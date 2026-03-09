@@ -1311,40 +1311,31 @@ function EmpenhosPageInner() {
       return true;
     });
 
-    // 3) remove duplicidade local (lista já carregada) — checa solicitacao E subprocesso
-    const idx = buildLocalIndex(lista);
-    const dupLocalList: string[] = [];
-    const semLocalDupe = semRepeticao.filter((r) => {
-      const k = keyNorm(r.solicitacao);
-      const isDup = idx.sol.has(k) || idx.sub.has(k);
-      if (isDup) dupLocalList.push(r.solicitacao);
-      return !isDup;
-    });
+    // 3) consulta o banco diretamente para todos os numeros importados
+    //    — checa se ja existe como solicitacao OU como subprocesso
+    const allSols = semRepeticao.map((x) => x.solicitacao);
 
-    if (!semLocalDupe.length) {
-      const skippedFile = uniq(repetidasNoArquivo);
-      const skippedLocal = uniq(dupLocalList);
-      const parts: string[] = ["Nada para importar: todas as solicitações já existem (duplicidade)."];
-      if (skippedLocal.length) parts.push(`Já existiam no sistema: ${skippedLocal.slice(0, 5).join(", ")}${skippedLocal.length > 5 ? "..." : ""}`);
-      if (skippedFile.length) parts.push(`Repetidas no arquivo: ${skippedFile.slice(0, 5).join(", ")}${skippedFile.length > 5 ? "..." : ""}`);
-      setMsg(parts.join("\n"));
-      return;
-    }
-
-    // 4) checa duplicidade no banco (evita corrida / lista desatualizada)
-    // — passa a solicitacao importada como subprocesso também, para detectar se já existe como subprocesso no banco
     try {
-      const found = await fetchExistingFromDB(
-        EMPENHOS_TABLE,
-        buildDupeKeysFromPayload(semLocalDupe.map((x) => ({ solicitacao: x.solicitacao, subprocesso: x.solicitacao })))
-      );
-      const finais = semLocalDupe.filter((r) => {
+      const found = await fetchExistingFromDB(EMPENHOS_TABLE, {
+        solicitacoes: allSols,
+        subprocessos: allSols,
+      });
+
+      const dupList: string[] = [];
+      const finais = semRepeticao.filter((r) => {
         const k = keyNorm(r.solicitacao);
-        return !found.solicitacoes.has(k) && !found.subprocessos.has(k);
+        const isDup = found.solicitacoes.has(k) || found.subprocessos.has(k);
+        if (isDup) dupList.push(r.solicitacao);
+        return !isDup;
       });
 
       if (!finais.length) {
-        setMsg("Nada para importar: as solicitações já existem no banco (duplicidade).");
+        const skippedFile = uniq(repetidasNoArquivo);
+        const skippedDup = uniq(dupList);
+        const parts: string[] = ["Nada para importar: todas as solicitacoes ja existem no sistema."];
+        if (skippedDup.length) parts.push(`Ja existiam: ${skippedDup.slice(0, 8).join(", ")}${skippedDup.length > 8 ? "..." : ""}`);
+        if (skippedFile.length) parts.push(`Repetidas no arquivo: ${skippedFile.slice(0, 5).join(", ")}${skippedFile.length > 5 ? "..." : ""}`);
+        setMsg(parts.join("\n"));
         return;
       }
 
@@ -1420,10 +1411,7 @@ function EmpenhosPageInner() {
       setResponsavelFilter("");
       setVerPendentes(false);
 
-      const skippedFileDup = uniq(repetidasNoArquivo).length;
-      const skippedLocalDup = uniq(dupLocalList).length;
-      const skippedBancoDup = semLocalDupe.length - finais.length;
-      const totalSkipped = skippedFileDup + skippedLocalDup + skippedBancoDup;
+      const totalSkipped = uniq(repetidasNoArquivo).length + uniq(dupList).length;
 
       await carregarLista();
 

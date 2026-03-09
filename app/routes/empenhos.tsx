@@ -1311,20 +1311,27 @@ function EmpenhosPageInner() {
       return true;
     });
 
-    // 3) consulta o banco diretamente para todos os numeros importados
-    //    — checa se ja existe como solicitacao OU como subprocesso
-    const allSols = semRepeticao.map((x) => x.solicitacao);
-
+    // 3) busca todos os registros do banco e compara localmente (case-insensitive)
     try {
-      const found = await fetchExistingFromDB(EMPENHOS_TABLE, {
-        solicitacoes: allSols,
-        subprocessos: allSols,
-      });
+      const { data: existing, error: existingError } = await supabase
+        .from(EMPENHOS_TABLE)
+        .select("solicitacao, subprocesso")
+        .limit(10000);
+
+      if (existingError) throw existingError;
+
+      const existingKeys = new Set<string>();
+      for (const row of (existing || []) as any[]) {
+        const s = keyNorm(row.solicitacao);
+        const b = keyNorm(row.subprocesso);
+        if (s) existingKeys.add(s);
+        if (b) existingKeys.add(b);
+      }
 
       const dupList: string[] = [];
       const finais = semRepeticao.filter((r) => {
         const k = keyNorm(r.solicitacao);
-        const isDup = found.solicitacoes.has(k) || found.subprocessos.has(k);
+        const isDup = existingKeys.has(k);
         if (isDup) dupList.push(r.solicitacao);
         return !isDup;
       });

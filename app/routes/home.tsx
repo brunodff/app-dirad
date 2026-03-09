@@ -108,7 +108,7 @@ export default function Home() {
             </div>
 
             <h1 className="hero-title reveal d1">
-              teste <span className="accent"></span>
+              Painéis de Gestão & Execução Orçamentária <span className="accent"></span>
             </h1>
 
             <button className="cta reveal d2" type="button" onClick={() => scrollToId("login")}>

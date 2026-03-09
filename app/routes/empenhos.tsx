@@ -900,7 +900,7 @@ function EmpenhosPageInner() {
       return;
     }
 
-    // 4) duplicidade contra o banco (evita “parou de funcionar” por corrida / lista desatualizada)
+    // 4) duplicidade contra o banco (evita "parou de funcionar" por corrida / lista desatualizada)
     try {
       const found = await fetchExistingFromDB(EMPENHOS_TABLE, batchKeys);
       const hitSol = batchKeys.solicitacoes.find((s) => found.solicitacoes.has(keyNorm(s)));
@@ -972,7 +972,6 @@ function EmpenhosPageInner() {
 
     localStorage.setItem(KEY_RR_PTR, String(ptr));
     setDrafts([]);
-    setMsg("Salvo com sucesso.");
     setAba("acompanhar");
 
     const t = todayISO();
@@ -982,6 +981,7 @@ function EmpenhosPageInner() {
     setReportTo(t);
 
     await carregarLista();
+    setMsg("Salvo com sucesso.");
   }
 
   async function addNomeDB() {
@@ -1084,8 +1084,8 @@ function EmpenhosPageInner() {
       return next;
     });
 
-    setMsg("Linha salva.");
     await carregarLista();
+    setMsg("Linha salva.");
   }
 
   async function excluirEmpenho(id: string) {
@@ -1109,8 +1109,8 @@ function EmpenhosPageInner() {
       return next;
     });
 
-    setMsg("Empenho excluído.");
     await carregarLista();
+    setMsg("Empenho excluído.");
   }
 
   function gerarExcelPorPeriodo(df: string, dt: string) {
@@ -1311,20 +1311,37 @@ function EmpenhosPageInner() {
       return true;
     });
 
-    // 3) remove duplicidade local (lista já carregada)
+    // 3) remove duplicidade local (lista já carregada) — checa solicitacao E subprocesso
     const idx = buildLocalIndex(lista);
-    const semLocalDupe = semRepeticao.filter((r) => !idx.sol.has(keyNorm(r.solicitacao)));
+    const dupLocalList: string[] = [];
+    const semLocalDupe = semRepeticao.filter((r) => {
+      const k = keyNorm(r.solicitacao);
+      const isDup = idx.sol.has(k) || idx.sub.has(k);
+      if (isDup) dupLocalList.push(r.solicitacao);
+      return !isDup;
+    });
 
     if (!semLocalDupe.length) {
-      const extra = repetidasNoArquivo.length ? `\nObs: havia repetidas no arquivo: ${uniq(repetidasNoArquivo).slice(0, 5).join(", ")}${repetidasNoArquivo.length > 5 ? "..." : ""}` : "";
-      setMsg("Nada para importar: todas as solicitações já existem (duplicidade)." + extra);
+      const skippedFile = uniq(repetidasNoArquivo);
+      const skippedLocal = uniq(dupLocalList);
+      const parts: string[] = ["Nada para importar: todas as solicitações já existem (duplicidade)."];
+      if (skippedLocal.length) parts.push(`Já existiam no sistema: ${skippedLocal.slice(0, 5).join(", ")}${skippedLocal.length > 5 ? "..." : ""}`);
+      if (skippedFile.length) parts.push(`Repetidas no arquivo: ${skippedFile.slice(0, 5).join(", ")}${skippedFile.length > 5 ? "..." : ""}`);
+      setMsg(parts.join("\n"));
       return;
     }
 
-    // 4) checa duplicidade no banco (pra não “voltar a registrar” por corrida)
+    // 4) checa duplicidade no banco (evita corrida / lista desatualizada)
+    // — passa a solicitacao importada como subprocesso também, para detectar se já existe como subprocesso no banco
     try {
-      const found = await fetchExistingFromDB(EMPENHOS_TABLE, buildDupeKeysFromPayload(semLocalDupe.map((x) => ({ solicitacao: x.solicitacao }))));
-      const finais = semLocalDupe.filter((r) => !found.solicitacoes.has(keyNorm(r.solicitacao)));
+      const found = await fetchExistingFromDB(
+        EMPENHOS_TABLE,
+        buildDupeKeysFromPayload(semLocalDupe.map((x) => ({ solicitacao: x.solicitacao, subprocesso: x.solicitacao })))
+      );
+      const finais = semLocalDupe.filter((r) => {
+        const k = keyNorm(r.solicitacao);
+        return !found.solicitacoes.has(k) && !found.subprocessos.has(k);
+      });
 
       if (!finais.length) {
         setMsg("Nada para importar: as solicitações já existem no banco (duplicidade).");
@@ -1404,10 +1421,14 @@ function EmpenhosPageInner() {
       setVerPendentes(false);
 
       const skippedFileDup = uniq(repetidasNoArquivo).length;
-      const msgExtra = skippedFileDup ? ` (ignorei ${skippedFileDup} repetida(s) dentro do arquivo)` : "";
-      setMsg(`Importado e salvo: ${payload.length} linha(s).${msgExtra}`);
+      const skippedLocalDup = uniq(dupLocalList).length;
+      const skippedBancoDup = semLocalDupe.length - finais.length;
+      const totalSkipped = skippedFileDup + skippedLocalDup + skippedBancoDup;
 
       await carregarLista();
+
+      const msgExtra = totalSkipped > 0 ? ` (${totalSkipped} ignorada(s) por duplicidade)` : "";
+      setMsg(`Importado e salvo: ${payload.length} linha(s).${msgExtra}`);
     } catch (e: any) {
       setMsg(`Erro ao checar duplicidade no banco: ${e?.message || e}`);
       return;

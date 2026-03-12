@@ -374,35 +374,41 @@ async function fetchExistingFromDB(table: string, keys: DupeKeys) {
 function GestorDashboard({ lista, loading }: { lista: EmpenhoRow[]; loading: boolean }) {
   const total = lista.length;
 
-  const renomeados = lista.filter((r) => r.renomeado === true).length;
-  const incluidos = lista.filter((r) => r.incluido === true).length;
-  const faltamRenomear = total - renomeados;
-  const faltamIncluir = total - incluidos;
+  // Concluído = renomeado E incluido; Pendente = falta renomear OU incluir
+  const isConcluido = (r: EmpenhoRow) => r.renomeado === true && r.incluido === true;
+  const isPend = (r: EmpenhoRow) => !isConcluido(r);
 
-  const concluidos = lista.filter((r) => r.status === "concluido").length;
-  const empenhados = lista.filter((r) => r.status === "empenhado").length;
-  const pendentes = lista.filter((r) => r.status === "pendente" || !r.status).length;
-
-  const aci = lista.filter((r) => r.situacao === "ACI").length;
-  const gl = lista.filter((r) => r.situacao === "GL").length;
-
-  const valorTotal = lista.reduce((s, r) => s + (r.valor || 0), 0);
-  const valorConcluido = lista.filter((r) => r.status === "concluido").reduce((s, r) => s + (r.valor || 0), 0);
-  const valorEmpenhado = lista.filter((r) => r.status === "empenhado").reduce((s, r) => s + (r.valor || 0), 0);
+  const concluidos = lista.filter(isConcluido).length;
+  const pendentes = lista.filter(isPend).length;
+  const faltamRenomear = lista.filter((r) => r.renomeado !== true).length;
+  const faltamIncluir = lista.filter((r) => r.incluido !== true).length;
   const semValor = lista.filter((r) => !r.valor).length;
 
-  const completos = lista.filter(
-    (r) => r.renomeado === true && r.incluido === true && r.siafi && r.siloms && r.subprocesso && r.solicitacao
-  ).length;
-  const pctCompleto = total > 0 ? Math.round((completos / total) * 100) : 0;
+  const pctCompleto = total > 0 ? Math.round((concluidos / total) * 100) : 0;
 
-  // Por OM
-  const omGroups: Record<string, number> = {};
+  // Valores — soma valor absoluto
+  const absVal = (r: EmpenhoRow) => Math.abs(r.valor || 0);
+  const valorTotal = lista.reduce((s, r) => s + absVal(r), 0);
+  const valorConcluido = lista.filter(isConcluido).reduce((s, r) => s + absVal(r), 0);
+  const valorPendente = lista.filter(isPend).reduce((s, r) => s + absVal(r), 0);
+
+  // Por UGCred
+  const ugGroups: Record<string, number> = {};
   for (const r of lista) {
-    const om = norm(r.om) || "N/A";
-    omGroups[om] = (omGroups[om] || 0) + 1;
+    const ug = norm(r.ugcred) || "N/A";
+    ugGroups[ug] = (ugGroups[ug] || 0) + 1;
   }
-  const topOM = Object.entries(omGroups).sort((a, b) => b[1] - a[1]);
+  const topUG = Object.entries(ugGroups).sort((a, b) => b[1] - a[1]);
+  const maxUG = topUG[0]?.[1] || 1;
+
+  // Por Obs
+  const obsGroups: Record<string, number> = {};
+  for (const r of lista) {
+    const ob = norm(r.obs) || "Sem obs";
+    obsGroups[ob] = (obsGroups[ob] || 0) + 1;
+  }
+  const topObs = Object.entries(obsGroups).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const maxObs = topObs[0]?.[1] || 1;
 
   // Por responsável (top 8)
   const respGroups: Record<string, number> = {};
@@ -428,6 +434,9 @@ function GestorDashboard({ lista, loading }: { lista: EmpenhoRow[]; loading: boo
     if (m) m.count++;
   }
   const maxMes = Math.max(...meses.map((m) => m.count), 1);
+
+  // Linhas pendentes (para a tabela)
+  const linhasPendentes = lista.filter(isPend);
 
   function Kpi({ label, val, color, sub }: { label: string; val: string | number; color?: string; sub?: string }) {
     return (
@@ -465,16 +474,15 @@ function GestorDashboard({ lista, loading }: { lista: EmpenhoRow[]; loading: boo
         <h3 style={{ margin: "0 0 14px 0" }}>Visão Geral</h3>
         <div className="kpi-grid">
           <Kpi label="Total de Empenhos" val={total} />
-          <Kpi label="Concluídos" val={concluidos} color="#22c55e" sub={`${Math.round(concluidos / total * 100)}%`} />
-          <Kpi label="Empenhados" val={empenhados} color="#3b82f6" sub={`${Math.round(empenhados / total * 100)}%`} />
-          <Kpi label="Pendentes" val={pendentes} color="#ef4444" sub={`${Math.round(pendentes / total * 100)}%`} />
+          <Kpi label="Concluídos" val={concluidos} color="#22c55e" sub={`${pctCompleto}%`} />
+          <Kpi label="Pendentes" val={pendentes} color="#ef4444" sub={`${total > 0 ? Math.round(pendentes / total * 100) : 0}%`} />
           <Kpi label="Faltam Renomear" val={faltamRenomear} color={faltamRenomear > 0 ? "#f97316" : "#22c55e"} />
           <Kpi label="Faltam Incluir" val={faltamIncluir} color={faltamIncluir > 0 ? "#f97316" : "#22c55e"} />
           <Kpi
-            label="Completude Geral"
+            label="Completude"
             val={`${pctCompleto}%`}
             color={pctCompleto >= 80 ? "#22c55e" : pctCompleto >= 50 ? "#eab308" : "#ef4444"}
-            sub={`${completos}/${total} completos`}
+            sub={`${concluidos}/${total}`}
           />
           <Kpi label="Sem Valor" val={semValor} color={semValor > 0 ? "#eab308" : "#22c55e"} />
         </div>
@@ -482,42 +490,120 @@ function GestorDashboard({ lista, loading }: { lista: EmpenhoRow[]; loading: boo
 
       {/* ── Valores ── */}
       <div className="card">
-        <h3 style={{ margin: "0 0 14px 0" }}>Valores (R$)</h3>
+        <h3 style={{ margin: "0 0 14px 0" }}>Valores (R$) — soma em módulo</h3>
         <div className="kpi-grid">
           <Kpi label="Valor Total" val={formatNumberBR(valorTotal)} color="#e7eefc" />
           <Kpi label="Valor Concluído" val={formatNumberBR(valorConcluido)} color="#22c55e" />
-          <Kpi label="Valor Empenhado" val={formatNumberBR(valorEmpenhado)} color="#3b82f6" />
-          <Kpi label="Valor Pendente" val={formatNumberBR(valorTotal - valorConcluido - valorEmpenhado)} color="#ef4444" />
+          <Kpi label="Valor Pendente" val={formatNumberBR(valorPendente)} color="#ef4444" />
         </div>
       </div>
 
-      {/* ── Status + Preenchimento ── */}
+      {/* ── Conclusão + Preenchimento ── */}
       <div className="dash-two-col">
         <div className="card">
-          <h3 style={{ margin: "0 0 14px 0" }}>Status dos Empenhos</h3>
-          <ProgBar label="Concluído" val={concluidos} tot={total} color="#22c55e" />
-          <ProgBar label="Empenhado" val={empenhados} tot={total} color="#3b82f6" />
+          <h3 style={{ margin: "0 0 14px 0" }}>Conclusão</h3>
+          <ProgBar label="Concluído (renomeado + incluído)" val={concluidos} tot={total} color="#22c55e" />
           <ProgBar label="Pendente" val={pendentes} tot={total} color="#ef4444" />
         </div>
         <div className="card">
           <h3 style={{ margin: "0 0 14px 0" }}>Preenchimento de Campos</h3>
-          <ProgBar label="Renomeado" val={renomeados} tot={total} color="#22c55e" />
-          <ProgBar label="Incluído" val={incluidos} tot={total} color="#06b6d4" />
+          <ProgBar label="Renomeado" val={lista.filter((r) => r.renomeado === true).length} tot={total} color="#22c55e" />
+          <ProgBar label="Incluído" val={lista.filter((r) => r.incluido === true).length} tot={total} color="#06b6d4" />
           <ProgBar label="SIAFI" val={lista.filter((r) => r.siafi).length} tot={total} color="#a855f7" />
           <ProgBar label="SILOMS" val={lista.filter((r) => r.siloms).length} tot={total} color="#f97316" />
           <ProgBar label="Valor" val={lista.filter((r) => r.valor).length} tot={total} color="#eab308" />
         </div>
       </div>
 
-      {/* ── Situação ACI / GL ── */}
-      <div className="card">
-        <h3 style={{ margin: "0 0 14px 0" }}>Situação (ACI / GL)</h3>
-        <div className="kpi-grid">
-          <Kpi label="ACI" val={aci} color="#3b82f6" sub={`${total > 0 ? Math.round(aci / total * 100) : 0}%`} />
-          <Kpi label="GL" val={gl} color="#a855f7" sub={`${total > 0 ? Math.round(gl / total * 100) : 0}%`} />
-          <Kpi label="Sem Situação" val={total - aci - gl} color="#6b7280" />
+      {/* ── Processos Pendentes ── */}
+      {linhasPendentes.length > 0 && (
+        <div className="card">
+          <h3 style={{ margin: "0 0 4px 0" }}>Processos Pendentes ({linhasPendentes.length})</h3>
+          <p className="muted" style={{ margin: "0 0 12px 0", fontSize: "0.85rem", fontWeight: 900 }}>
+            Faltam ser renomeados e/ou incluídos
+          </p>
+          <div style={{ overflowX: "auto" }}>
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th>Subprocesso</th>
+                  <th>Solicitação</th>
+                  <th>SIAFI</th>
+                  <th>SILOMS</th>
+                  <th>Renomeado</th>
+                  <th>Incluído</th>
+                  <th>Responsável</th>
+                </tr>
+              </thead>
+              <tbody>
+                {linhasPendentes.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.subprocesso || <span className="muted">—</span>}</td>
+                    <td>{r.solicitacao || <span className="muted">—</span>}</td>
+                    <td>{r.siafi || <span style={{ color: "#ef4444", fontWeight: 900 }}>Falta</span>}</td>
+                    <td>{r.siloms || <span style={{ color: "#ef4444", fontWeight: 900 }}>Falta</span>}</td>
+                    <td>
+                      <span style={{ color: r.renomeado === true ? "#22c55e" : "#ef4444", fontWeight: 900 }}>
+                        {r.renomeado === true ? "Sim" : "Não"}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ color: r.incluido === true ? "#22c55e" : "#ef4444", fontWeight: 900 }}>
+                        {r.incluido === true ? "Sim" : "Não"}
+                      </span>
+                    </td>
+                    <td>{r.responsavel || <span className="muted">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ── Por UGCred ── */}
+      {topUG.length > 0 && (
+        <div className="card">
+          <h3 style={{ margin: "0 0 14px 0" }}>Distribuição por UGCred</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {topUG.map(([ug, count]) => (
+              <div key={ug}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontWeight: 900, fontSize: "0.88rem" }}>{ug}</span>
+                  <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "0.88rem" }}>
+                    {count} ({total > 0 ? Math.round(count / total * 100) : 0}%)
+                  </span>
+                </div>
+                <div className="prog-bar">
+                  <div className="prog-fill" style={{ width: `${Math.round(count / maxUG * 100)}%`, background: colorForName(ug) }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Por Obs ── */}
+      {topObs.length > 0 && (
+        <div className="card">
+          <h3 style={{ margin: "0 0 14px 0" }}>Distribuição por Observação</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {topObs.map(([ob, count]) => (
+              <div key={ob}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontWeight: 900, fontSize: "0.88rem" }}>{ob}</span>
+                  <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "0.88rem" }}>
+                    {count} ({total > 0 ? Math.round(count / total * 100) : 0}%)
+                  </span>
+                </div>
+                <div className="prog-bar">
+                  <div className="prog-fill" style={{ width: `${Math.round(count / maxObs * 100)}%`, background: colorForName(ob) }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Responsáveis ── */}
       <div className="card">
@@ -538,18 +624,6 @@ function GestorDashboard({ lista, loading }: { lista: EmpenhoRow[]; loading: boo
           ))}
         </div>
       </div>
-
-      {/* ── Por OM ── */}
-      {topOM.length > 0 && (
-        <div className="card">
-          <h3 style={{ margin: "0 0 14px 0" }}>Distribuição por OM</h3>
-          <div className="kpi-grid">
-            {topOM.map(([om, count]) => (
-              <Kpi key={om} label={om} val={count} sub={`${total > 0 ? Math.round(count / total * 100) : 0}%`} />
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── Empenhos por Mês ── */}
       <div className="card">
@@ -1840,6 +1914,11 @@ function EmpenhosPageInner() {
         .bar-fill{width:100%;background:#22c55e;border-radius:6px 6px 0 0;transition:height .4s ease}
         .bar-val{font-weight:1000;font-size:.85rem}
         .bar-label{color:var(--muted);font-size:.72rem;font-weight:900;text-align:center}
+        .dash-table{width:100%;border-collapse:collapse;font-size:.85rem}
+        .dash-table th,.dash-table td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+        .dash-table th{color:var(--muted);font-weight:900;font-size:.8rem}
+        .dash-table tr:last-child td{border-bottom:none}
+        .dash-table tbody tr:hover{background:rgba(255,255,255,.03)}
 
         .rowActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
 

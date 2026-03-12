@@ -368,6 +368,209 @@ async function fetchExistingFromDB(table: string, keys: DupeKeys) {
   return found;
 }
 
+// ============================================================
+// GESTOR DASHBOARD
+// ============================================================
+function GestorDashboard({ lista, loading }: { lista: EmpenhoRow[]; loading: boolean }) {
+  const total = lista.length;
+
+  const renomeados = lista.filter((r) => r.renomeado === true).length;
+  const incluidos = lista.filter((r) => r.incluido === true).length;
+  const faltamRenomear = total - renomeados;
+  const faltamIncluir = total - incluidos;
+
+  const concluidos = lista.filter((r) => r.status === "concluido").length;
+  const empenhados = lista.filter((r) => r.status === "empenhado").length;
+  const pendentes = lista.filter((r) => r.status === "pendente" || !r.status).length;
+
+  const aci = lista.filter((r) => r.situacao === "ACI").length;
+  const gl = lista.filter((r) => r.situacao === "GL").length;
+
+  const valorTotal = lista.reduce((s, r) => s + (r.valor || 0), 0);
+  const valorConcluido = lista.filter((r) => r.status === "concluido").reduce((s, r) => s + (r.valor || 0), 0);
+  const valorEmpenhado = lista.filter((r) => r.status === "empenhado").reduce((s, r) => s + (r.valor || 0), 0);
+  const semValor = lista.filter((r) => !r.valor).length;
+
+  const completos = lista.filter(
+    (r) => r.renomeado === true && r.incluido === true && r.siafi && r.siloms && r.subprocesso && r.solicitacao
+  ).length;
+  const pctCompleto = total > 0 ? Math.round((completos / total) * 100) : 0;
+
+  // Por OM
+  const omGroups: Record<string, number> = {};
+  for (const r of lista) {
+    const om = norm(r.om) || "N/A";
+    omGroups[om] = (omGroups[om] || 0) + 1;
+  }
+  const topOM = Object.entries(omGroups).sort((a, b) => b[1] - a[1]);
+
+  // Por responsável (top 8)
+  const respGroups: Record<string, number> = {};
+  for (const r of lista) {
+    const resp = norm(r.responsavel) || "N/D";
+    respGroups[resp] = (respGroups[resp] || 0) + 1;
+  }
+  const topResp = Object.entries(respGroups).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const maxResp = topResp[0]?.[1] || 1;
+
+  // Por mês (últimos 6 meses)
+  const now = new Date();
+  const meses: Array<{ label: string; key: string; count: number }> = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" });
+    meses.push({ label, key, count: 0 });
+  }
+  for (const r of lista) {
+    const dk = dateKey(r).slice(0, 7);
+    const m = meses.find((x) => x.key === dk);
+    if (m) m.count++;
+  }
+  const maxMes = Math.max(...meses.map((m) => m.count), 1);
+
+  function Kpi({ label, val, color, sub }: { label: string; val: string | number; color?: string; sub?: string }) {
+    return (
+      <div className="kpi-card">
+        <div className="kpi-val" style={color ? { color } : undefined}>{val}</div>
+        <div className="kpi-label">{label}</div>
+        {sub && <div className="kpi-sub">{sub}</div>}
+      </div>
+    );
+  }
+
+  function ProgBar({ label, val, tot, color }: { label: string; val: number; tot: number; color: string }) {
+    const pct = tot > 0 ? Math.round((val / tot) * 100) : 0;
+    return (
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+          <span style={{ fontWeight: 900, fontSize: "0.88rem" }}>{label}</span>
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "0.88rem" }}>{val} ({pct}%)</span>
+        </div>
+        <div className="prog-bar">
+          <div className="prog-fill" style={{ width: `${pct}%`, background: color }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) return <div className="card"><span className="muted">Carregando dados...</span></div>;
+  if (!total) return <div className="card"><span className="muted">Nenhum empenho cadastrado ainda.</span></div>;
+
+  return (
+    <div className="stack">
+
+      {/* ── Visão Geral ── */}
+      <div className="card">
+        <h3 style={{ margin: "0 0 14px 0" }}>Visão Geral</h3>
+        <div className="kpi-grid">
+          <Kpi label="Total de Empenhos" val={total} />
+          <Kpi label="Concluídos" val={concluidos} color="#22c55e" sub={`${Math.round(concluidos / total * 100)}%`} />
+          <Kpi label="Empenhados" val={empenhados} color="#3b82f6" sub={`${Math.round(empenhados / total * 100)}%`} />
+          <Kpi label="Pendentes" val={pendentes} color="#ef4444" sub={`${Math.round(pendentes / total * 100)}%`} />
+          <Kpi label="Faltam Renomear" val={faltamRenomear} color={faltamRenomear > 0 ? "#f97316" : "#22c55e"} />
+          <Kpi label="Faltam Incluir" val={faltamIncluir} color={faltamIncluir > 0 ? "#f97316" : "#22c55e"} />
+          <Kpi
+            label="Completude Geral"
+            val={`${pctCompleto}%`}
+            color={pctCompleto >= 80 ? "#22c55e" : pctCompleto >= 50 ? "#eab308" : "#ef4444"}
+            sub={`${completos}/${total} completos`}
+          />
+          <Kpi label="Sem Valor" val={semValor} color={semValor > 0 ? "#eab308" : "#22c55e"} />
+        </div>
+      </div>
+
+      {/* ── Valores ── */}
+      <div className="card">
+        <h3 style={{ margin: "0 0 14px 0" }}>Valores (R$)</h3>
+        <div className="kpi-grid">
+          <Kpi label="Valor Total" val={formatNumberBR(valorTotal)} color="#e7eefc" />
+          <Kpi label="Valor Concluído" val={formatNumberBR(valorConcluido)} color="#22c55e" />
+          <Kpi label="Valor Empenhado" val={formatNumberBR(valorEmpenhado)} color="#3b82f6" />
+          <Kpi label="Valor Pendente" val={formatNumberBR(valorTotal - valorConcluido - valorEmpenhado)} color="#ef4444" />
+        </div>
+      </div>
+
+      {/* ── Status + Preenchimento ── */}
+      <div className="dash-two-col">
+        <div className="card">
+          <h3 style={{ margin: "0 0 14px 0" }}>Status dos Empenhos</h3>
+          <ProgBar label="Concluído" val={concluidos} tot={total} color="#22c55e" />
+          <ProgBar label="Empenhado" val={empenhados} tot={total} color="#3b82f6" />
+          <ProgBar label="Pendente" val={pendentes} tot={total} color="#ef4444" />
+        </div>
+        <div className="card">
+          <h3 style={{ margin: "0 0 14px 0" }}>Preenchimento de Campos</h3>
+          <ProgBar label="Renomeado" val={renomeados} tot={total} color="#22c55e" />
+          <ProgBar label="Incluído" val={incluidos} tot={total} color="#06b6d4" />
+          <ProgBar label="SIAFI" val={lista.filter((r) => r.siafi).length} tot={total} color="#a855f7" />
+          <ProgBar label="SILOMS" val={lista.filter((r) => r.siloms).length} tot={total} color="#f97316" />
+          <ProgBar label="Valor" val={lista.filter((r) => r.valor).length} tot={total} color="#eab308" />
+        </div>
+      </div>
+
+      {/* ── Situação ACI / GL ── */}
+      <div className="card">
+        <h3 style={{ margin: "0 0 14px 0" }}>Situação (ACI / GL)</h3>
+        <div className="kpi-grid">
+          <Kpi label="ACI" val={aci} color="#3b82f6" sub={`${total > 0 ? Math.round(aci / total * 100) : 0}%`} />
+          <Kpi label="GL" val={gl} color="#a855f7" sub={`${total > 0 ? Math.round(gl / total * 100) : 0}%`} />
+          <Kpi label="Sem Situação" val={total - aci - gl} color="#6b7280" />
+        </div>
+      </div>
+
+      {/* ── Responsáveis ── */}
+      <div className="card">
+        <h3 style={{ margin: "0 0 14px 0" }}>Distribuição por Responsável</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {topResp.map(([nome, count]) => (
+            <div key={nome}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontWeight: 900 }}>{nome}</span>
+                <span style={{ color: "var(--muted)", fontWeight: 900 }}>
+                  {count} ({total > 0 ? Math.round(count / total * 100) : 0}%)
+                </span>
+              </div>
+              <div className="prog-bar">
+                <div className="prog-fill" style={{ width: `${Math.round(count / maxResp * 100)}%`, background: colorForName(nome) }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Por OM ── */}
+      {topOM.length > 0 && (
+        <div className="card">
+          <h3 style={{ margin: "0 0 14px 0" }}>Distribuição por OM</h3>
+          <div className="kpi-grid">
+            {topOM.map(([om, count]) => (
+              <Kpi key={om} label={om} val={count} sub={`${total > 0 ? Math.round(count / total * 100) : 0}%`} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Empenhos por Mês ── */}
+      <div className="card">
+        <h3 style={{ margin: "0 0 14px 0" }}>Empenhos por Mês (últimos 6 meses)</h3>
+        <div className="bar-chart">
+          {meses.map((m) => (
+            <div key={m.key} className="bar-item">
+              <div className="bar-track">
+                <div className="bar-fill" style={{ height: `${Math.round(m.count / maxMes * 100)}%` }} />
+              </div>
+              <div className="bar-val">{m.count}</div>
+              <div className="bar-label">{m.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
 function EmpenhosPageInner() {
   const nav = useNavigate();
 
@@ -386,7 +589,8 @@ function EmpenhosPageInner() {
   const [ident, setIdent] = React.useState<Identidade | null>(null);
   const nomeIdent = ident ? `${ident.posto} ${ident.nomeGuerra}` : "";
 
-  const [aba, setAba] = React.useState<"cadastrar" | "acompanhar">("cadastrar");
+  const [aba, setAba] = React.useState<"cadastrar" | "acompanhar" | "gerenciamento">("cadastrar");
+  const [role, setRole] = React.useState<string | null>(null);
 
   const [lista, setLista] = React.useState<EmpenhoRow[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -532,11 +736,12 @@ function EmpenhosPageInner() {
         return;
       }
 
-      // ✅ pega unidade do profiles
+      // ✅ pega unidade e role do profiles
       try {
-        const { data: prof } = await supabase.from("profiles").select("unidade").eq("id", uid).maybeSingle();
+        const { data: prof } = await supabase.from("profiles").select("unidade, role").eq("id", uid).maybeSingle();
         const u = (prof?.unidade || "GAP-MN").toString().toUpperCase();
         setUnidade(u === "GAP-DF" ? "GAP-DF" : "GAP-MN");
+        setRole((prof as any)?.role ?? null);
       } catch {
         setUnidade("GAP-MN");
       }
@@ -1598,6 +1803,44 @@ function EmpenhosPageInner() {
         }
         @media (max-width: 980px){ .gridLine{grid-template-columns: repeat(2, minmax(0,1fr));} }
 
+        /* ── Dashboard Gestor ── */
+        .kpi-grid{
+          display:grid;
+          grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+          gap:12px;
+        }
+        .kpi-card{
+          background:rgba(255,255,255,.04);
+          border:1px solid var(--line);
+          border-radius:12px;
+          padding:14px 12px;
+          display:flex;
+          flex-direction:column;
+          gap:4px;
+        }
+        .kpi-val{font-size:1.55rem;font-weight:1000;line-height:1}
+        .kpi-label{color:var(--muted);font-size:.82rem;font-weight:900}
+        .kpi-sub{color:rgba(255,255,255,.4);font-size:.78rem;font-weight:900}
+        .prog-bar{height:8px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden}
+        .prog-fill{height:100%;border-radius:999px;transition:width .4s ease}
+        .dash-two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+        @media(max-width:700px){.dash-two-col{grid-template-columns:1fr}}
+        .bar-chart{
+          display:flex;
+          gap:12px;
+          align-items:flex-end;
+          height:160px;
+          padding-bottom:4px;
+        }
+        .bar-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%}
+        .bar-track{
+          flex:1;width:100%;background:rgba(255,255,255,.06);
+          border-radius:8px 8px 0 0;display:flex;align-items:flex-end;overflow:hidden;
+        }
+        .bar-fill{width:100%;background:#22c55e;border-radius:6px 6px 0 0;transition:height .4s ease}
+        .bar-val{font-weight:1000;font-size:.85rem}
+        .bar-label{color:var(--muted);font-size:.72rem;font-weight:900;text-align:center}
+
         .rowActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
 
         .checkBoxRow{
@@ -1923,8 +2166,18 @@ function EmpenhosPageInner() {
                   <button className={`tab ${aba === "acompanhar" ? "active" : ""}`} onClick={() => setAba("acompanhar")}>
                     Acompanhar
                   </button>
+                  {role === "GESTOR" && (
+                    <button className={`tab ${aba === "gerenciamento" ? "active" : ""}`} onClick={() => setAba("gerenciamento")}>
+                      Gerenciamento
+                    </button>
+                  )}
                 </div>
               </div>
+
+              {/* ===== GERENCIAMENTO (GESTOR) ===== */}
+              {aba === "gerenciamento" && role === "GESTOR" && (
+                <GestorDashboard lista={lista} loading={loading} />
+              )}
 
               {/* ===== CADASTRAR ===== */}
               {aba === "cadastrar" && (

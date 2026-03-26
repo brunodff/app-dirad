@@ -56,6 +56,15 @@ const KEY_IDENT = "empenhos_identidade";
 const KEY_DRAFTS = "empenhos_drafts";
 const KEY_POOL_AUTO_OFF = "empenhos_pool_auto_off";
 const KEY_RR_PTR = "empenhos_rr_ptr";
+// Ciclo fixo de distribuição: Anne 40%, Elaine 40%, Bruno 20%
+const DIST_CYCLE = ["3S Anne", "3S Elaine", "3S Anne", "3S Elaine", "2T Bruno"] as const;
+function pickFromCycle(): string {
+  let ptr = Number(localStorage.getItem(KEY_RR_PTR) || "0");
+  if (!Number.isFinite(ptr) || ptr < 0) ptr = 0;
+  const chosen = DIST_CYCLE[ptr % DIST_CYCLE.length];
+  localStorage.setItem(KEY_RR_PTR, String((ptr + 1) % DIST_CYCLE.length));
+  return chosen;
+}
 const KEY_REPORT_EMAIL = "empenhos_report_email";
 const KEY_REPORT_FROM = "empenhos_report_from";
 const KEY_REPORT_TO = "empenhos_report_to";
@@ -1203,30 +1212,8 @@ function EmpenhosPageInner() {
       return;
     }
 
-    // ===== distribuição RR =====
-    let ptr = Number(localStorage.getItem(KEY_RR_PTR) || "0");
-    if (!Number.isFinite(ptr) || ptr < 0) ptr = 0;
-
-    const counts = new Map<string, number>();
-    for (const p of poolAuto) counts.set(p, 0);
-    for (const e of lista) {
-      const r = norm(e.responsavel);
-      if (counts.has(r)) counts.set(r, (counts.get(r) || 0) + 1);
-    }
-
-    const pickNext = () => {
-      if (!poolAuto.length) return nomeIdent || poolManual[0] || "—";
-      let min = Infinity;
-      for (const p of poolAuto) min = Math.min(min, counts.get(p) ?? 0);
-      const tied = poolAuto.filter((p) => (counts.get(p) ?? 0) === min);
-      const chosen = tied[ptr % tied.length] || tied[0] || poolAuto[0];
-      ptr = (ptr + 1) % Math.max(tied.length, 1);
-      counts.set(chosen, (counts.get(chosen) || 0) + 1);
-      return chosen;
-    };
-
     const payload = drafts.map((d) => {
-      const resp = d.modo === "manual" ? norm(d.responsavel_manual) : pickNext();
+      const resp = d.modo === "manual" ? norm(d.responsavel_manual) : pickFromCycle();
       return {
         subprocesso: norm(d.subprocesso),
         solicitacao: norm(d.solicitacao),
@@ -1249,7 +1236,6 @@ function EmpenhosPageInner() {
       return;
     }
 
-    localStorage.setItem(KEY_RR_PTR, String(ptr));
     setDrafts([]);
     setAba("acompanhar");
 
@@ -1625,33 +1611,11 @@ function EmpenhosPageInner() {
         return;
       }
 
-      // ===== distribuição RR =====
-      let ptr = Number(localStorage.getItem(KEY_RR_PTR) || "0");
-      if (!Number.isFinite(ptr) || ptr < 0) ptr = 0;
-
-      const counts = new Map<string, number>();
-      for (const p of poolAuto) counts.set(p, 0);
-      for (const e of lista) {
-        const r = norm(e.responsavel);
-        if (counts.has(r)) counts.set(r, (counts.get(r) || 0) + 1);
-      }
-
-      const pickNext = () => {
-        if (!poolAuto.length) return nomeIdent || poolManual[0] || "—";
-        let min = Infinity;
-        for (const p of poolAuto) min = Math.min(min, counts.get(p) ?? 0);
-        const tied = poolAuto.filter((p) => (counts.get(p) ?? 0) === min);
-        const chosen = tied[ptr % tied.length] || tied[0] || poolAuto[0];
-        ptr = (ptr + 1) % Math.max(tied.length, 1);
-        counts.set(chosen, (counts.get(chosen) || 0) + 1);
-        return chosen;
-      };
-
       const payload = finais.map((r) => ({
         subprocesso: "",
         solicitacao: r.solicitacao,
         ugcred: r.ugcred || null,
-        responsavel: mode === "manual" ? manualName : pickNext(),
+        responsavel: mode === "manual" ? manualName : pickFromCycle(),
         created_by: sessionUserId,
         data_solicitacao: r.data_solicitacao || todayISO(),
         criado_por: nomeIdent,
@@ -1674,7 +1638,6 @@ function EmpenhosPageInner() {
         return;
       }
 
-      localStorage.setItem(KEY_RR_PTR, String(ptr));
 
       setImportPreview([]);
       setImportRaw([]);

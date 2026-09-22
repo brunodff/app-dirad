@@ -10,7 +10,7 @@
     "typecheck": "react-router typegen && tsc"
   },
   "dependencies": {
-    "@react-router/cloudflare": "^7.18.4",
+    "@react-router/cloudflare": "^7.9.5",
     "@react-router/node": "^7.9.2",
     "@react-router/serve": "^7.9.2",
     "@supabase/supabase-js": "^2.49.4",

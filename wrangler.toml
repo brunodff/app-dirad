@@ -1,0 +1,4 @@
+name = "app-dirad"
+compatibility_date = "2024-11-18"
+compatibility_flags = ["nodejs_compat_v2"]
+pages_build_output_dir = "./build/client"

@@ -19,6 +19,8 @@ export default async function handleRequest(
     }
   );
 
+  await stream.allReady;
+
   responseHeaders.set("Content-Type", "text/html");
   return new Response(stream, {
     headers: responseHeaders,

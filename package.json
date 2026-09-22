@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "react-router build",
-    "build:cf": "react-router build && node -e \"const{copyFileSync}=require('fs');copyFileSync('build/server/index.js','build/client/_worker.js')\"",
+    "build:cf": "react-router build && npx esbuild worker.ts --bundle --format=esm --outfile=build/client/_worker.js --platform=browser --external:node:* --external:crypto",
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc"

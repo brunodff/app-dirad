@@ -1,10 +1,27 @@
-import { createRequestHandler } from "@react-router/cloudflare";
-import * as build from "virtual:react-router/server-build";
+import { renderToReadableStream } from "react-dom/server";
+import { ServerRouter } from "react-router";
+import type { EntryContext } from "react-router";
 
-const requestHandler = createRequestHandler(build, import.meta.env.MODE);
+export default async function handleRequest(
+  request: Request,
+  responseStatusCode: number,
+  responseHeaders: Headers,
+  routerContext: EntryContext
+) {
+  const stream = await renderToReadableStream(
+    <ServerRouter context={routerContext} url={request.url} />,
+    {
+      signal: request.signal,
+      onError(error: unknown) {
+        console.error(error);
+        responseStatusCode = 500;
+      },
+    }
+  );
 
-export default {
-  async fetch(request: Request): Promise<Response> {
-    return requestHandler(request, {});
-  },
-};
+  responseHeaders.set("Content-Type", "text/html");
+  return new Response(stream, {
+    headers: responseHeaders,
+    status: responseStatusCode,
+  });
+}

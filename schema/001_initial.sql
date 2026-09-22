@@ -277,7 +277,9 @@ emp AS (
     SUM(a_liquidar + em_liquidacao + liq_a_pagar + pago) AS empenhado
   FROM (
     SELECT DISTINCT ON (operacao, ug_exec_cod, ug_resp_cod, nd_cod) *
-    FROM empenhos ORDER BY operacao, ug_exec_cod, ug_resp_cod, nd_cod, snapshot_em DESC
+    FROM empenhos
+    WHERE ug_resp_cod = '120115'   -- somente empenhos do COMAE
+    ORDER BY operacao, ug_exec_cod, ug_resp_cod, nd_cod, snapshot_em DESC
   ) e
   GROUP BY operacao
 )

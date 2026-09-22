@@ -2,16 +2,15 @@
  * POST /api/sync
  * Recebe os dados do Apps Script (BD_CREDITO + BD_EMPENHOS) e aciona a ingestão.
  * Protegido por token secreto (SYNC_SECRET_TOKEN).
+ *
+ * Nota: handlePost é chamado tanto pelo action (POST direto) quanto pelo loader
+ * (fallback para quando há redirect automático de POST→GET em alguns ambientes).
  */
 
-import type { ActionFunctionArgs } from 'react-router';
+import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
 import { ingerir, type SyncPayload } from '~/lib/sync/ingestao';
 
-export async function action({ request }: ActionFunctionArgs) {
-  if (request.method !== 'POST') {
-    return Response.json({ error: 'Method not allowed' }, { status: 405 });
-  }
-
+async function handlePost(request: Request): Promise<Response> {
   let body: Record<string, unknown>;
   try {
     body = await request.json();
@@ -19,7 +18,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: 'JSON inválido' }, { status: 400 });
   }
 
-  // Valida token
   const token = process.env['SYNC_SECRET_TOKEN'];
   if (!token || body['token'] !== token) {
     return Response.json({ error: 'Não autorizado' }, { status: 401 });
@@ -57,7 +55,17 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
-// GET: health check do endpoint (Apps Script pode chamar antes de sync)
-export async function loader() {
-  return Response.json({ status: 'ok', endpoint: '/api/sync' });
+export async function action({ request }: ActionFunctionArgs) {
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
+  }
+  return handlePost(request);
+}
+
+// Aceita POST no loader como fallback (cobre redirect POST→GET em alguns ambientes)
+export async function loader({ request }: LoaderFunctionArgs) {
+  if (request.method === 'POST') {
+    return handlePost(request);
+  }
+  return Response.json({ status: 'ready', endpoint: '/api/sync', info: 'Use POST to sync' });
 }

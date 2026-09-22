@@ -1,13 +1,12 @@
-import type { Route } from "./+types/home";
-import { Welcome } from "../welcome/welcome";
+import type { LoaderFunctionArgs } from 'react-router';
+import { redirect } from 'react-router';
+import { getUser } from '~/lib/session.server';
 
-export function meta({}: Route.MetaArgs) {
-  return [
-    { title: "New React Router App" },
-    { name: "description", content: "Welcome to React Router!" },
-  ];
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await getUser(request);
+  throw redirect(user ? '/painel' : '/login');
 }
 
 export default function Home() {
-  return <Welcome />;
+  return null;
 }

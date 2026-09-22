@@ -20,6 +20,8 @@ export interface MovimentoCredito {
   /** Valor com sinal: positivo = entrada, negativo = saída */
   valor: number;
   pedido: string;
+  acaoCod?: string;
+  acaoNome?: string;
 }
 
 export type TipoMovimento =
@@ -49,12 +51,15 @@ export interface EmpenhoRow {
   ugRespNome: string;
   ndCod: string;
   ndNome: string;
+  subop: string | null;
   disponivel: number;
   aLiquidar: number;
   emLiquidacao: number;
   liqAPagar: number;
   pago: number;
   total: number;
+  acaoCod?: string;
+  acaoNome?: string;
 }
 
 /** Exceção por NC (configurável pelo ADEZ, ex.: COMAEX / HEMATITA) */

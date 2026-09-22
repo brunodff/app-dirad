@@ -8,6 +8,20 @@
 import { normalizar, extrairAno } from './normalizar';
 import type { MovimentoCredito, ExcecaoNC } from './types';
 
+// ── CHAVE DE PAREAMENTO ───────────────────────────────────────────────────────
+
+/**
+ * Chave única para relacionar contrapartidas: NC + operação normalizada.
+ * Nunca use r.nc cru como chave de map/set — a mesma NC pode aparecer em
+ * operações distintas e o pareamento cruzado gera classificações erradas.
+ *
+ * Exceção: overrides manuais do usuário (excecoesNC) continuam chaveados
+ * apenas pela NC, pois a decisão acompanha a nota independentemente da operação.
+ */
+export function chaveNC(r: { nc: string; operacao: string }): string {
+  return r.nc + '@' + normalizar(r.operacao);
+}
+
 // ── CONSTANTES ───────────────────────────────────────────────────────────────
 export const UG_COMAE = '120115';
 
@@ -23,7 +37,7 @@ const RE_OP_COMAEX    = /COMAEX/;
 const RE_OP_HEMATITA  = /HEMATITA/;
 // TOTEQ: três grafias possíveis, incluindo a sigla
 const RE_OP_TOTEQ     = /TRANSP\.?\s*ORGAOS E EQUIPES|TRANSPORTE DE ORGAOS E EQUIPES|\bTOTEQ\b/;
-const RE_CORRECAO_UGR = /CORRECAO DE UGR/;
+const RE_CORRECAO_UGR = /CORRECAO DE UGR|ANULACAO PARA DESCENTRALIZACAO/;
 const RE_ZIDA         = /\bZIDA\b/i;
 const RE_OP_CATRIMANI = /CATRIMANI/i;
 const RE_UG_DIRETORIA = /DIRETORIA DE ECON/;
@@ -181,8 +195,8 @@ export function ehRecebidoLinha(
   if (r.valor > 0) return ehRecebidoPositivo(r, ncCoopEmaer, excecoesNC);
 
   // ---- NEGATIVO = RECOLHIMENTO ----
-  // Se a NC entrou em unidade, a saída do COMAE é descentralização — não recolhimento.
-  if (ncEntraUnidade.has(r.nc)) return false;
+  // Se a NC+op entrou em unidade, a saída do COMAE é descentralização — não recolhimento.
+  if (ncEntraUnidade.has(chaveNC(r))) return false;
   if (ehUgExecDiretoria(r)) return false;
   // GOTA/TOTEQ: saída sem destino em unidade = recolhimento
   if (ehRecebidoRegraAmpla(r)) return true;
@@ -190,8 +204,8 @@ export function ehRecebidoLinha(
   if (ehDescricaoRecebida(r)) return true;
   // Operações de exceção: não usa pareamento padrão
   if (ehOperacaoExcecao(normalizar(r.operacao))) return false;
-  // Fallback: mesmo NC + UG_RESP que já teve positivo reconhecido
-  return chaveRecebidaPositiva.has(r.ugRespCod + '|' + r.nc);
+  // Fallback: mesmo NC+op + UG_RESP que já teve positivo reconhecido
+  return chaveRecebidaPositiva.has(r.ugRespCod + '|' + chaveNC(r));
 }
 
 // ── 3.3 DESCENTRALIZADO ──────────────────────────────────────────────────────
@@ -207,7 +221,7 @@ export function ehSaidaComae(
   if (r.ugRespCod !== UG_COMAE) return false;
   if (r.valor >= 0) return false;
   if (!r.nc || r.nc === 'SEM NC') return false;
-  if (!ncEntraUnidade.has(r.nc)) return false;
+  if (!ncEntraUnidade.has(chaveNC(r))) return false;
   // CATRIMANI com COMGAP nunca é descentralização
   if (
     RE_OP_CATRIMANI.test(normalizar(r.operacao)) &&
@@ -230,7 +244,7 @@ export function ehDevolucaoComae(
   if (extrairAno(r.data) !== '2026') return false;
   if (r.ugRespCod !== UG_COMAE) return false;
   if (r.valor <= 0) return false;
-  if (!ncNegativaEmUnidade.has(r.nc)) return false;
+  if (!ncNegativaEmUnidade.has(chaveNC(r))) return false;
   if (RE_CORRECAO_UGR.test(normalizar(r.descricao))) return false;
   return true;
 }

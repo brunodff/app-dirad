@@ -11,6 +11,7 @@ import {
   DEFAULT_EXCECOES_NC,
   resolverExcecoesNC,
   construirSetsCooperacion,
+  chaveNC,
   ehRecebidoPositivo,
   ehRecebidoLinha,
   ehRecebidoUnidades,
@@ -51,21 +52,22 @@ export function classificar(
   // ── SETS DE APOIO (construídos de TODOS os anos) ──────────────────────────
   const ncCoopEmaer = construirSetsCooperacion(registros);
 
+  // Chaveados por NC+operação — evita pareamento cruzado entre operações distintas.
   const ncEntraUnidade      = new Set<string>();
   const ncNegativaEmUnidade = new Set<string>();
   for (const r of registros) {
     if (r.ugRespCod !== UG_COMAE) {
-      if (r.valor > 0) ncEntraUnidade.add(r.nc);
-      if (r.valor < 0) ncNegativaEmUnidade.add(r.nc);
+      if (r.valor > 0) ncEntraUnidade.add(chaveNC(r));
+      if (r.valor < 0) ncNegativaEmUnidade.add(chaveNC(r));
     }
   }
 
-  // chaveRecebidaPositiva = "UG_RESP|NC" para positivos classificáveis como recebidos.
-  // Usado no fallback das negativas (recolhimento por pareamento de NC).
+  // chaveRecebidaPositiva = "UG_RESP|NC@op" para positivos classificáveis como recebidos.
+  // Usado no fallback das negativas (recolhimento por pareamento de NC+op).
   const chaveRecebidaPositiva = new Set<string>();
   for (const r of registros) {
     if (ehRecebidoPositivo(r, ncCoopEmaer, excecoesNC)) {
-      chaveRecebidaPositiva.add(r.ugRespCod + '|' + r.nc);
+      chaveRecebidaPositiva.add(r.ugRespCod + '|' + chaveNC(r));
     }
   }
 
@@ -122,19 +124,19 @@ export function classificar(
     }
   }
 
-  // ── MAPA UG DESTINO por NC ────────────────────────────────────────────────
+  // ── MAPA UG DESTINO por NC+op ────────────────────────────────────────────
   // Para linhas DESCENTRALIZADO, exibe a unidade que recebeu o crédito.
   const destinoPorNC = new Map<string, { cod: string; nome: string }>();
   for (const r of registros) {
-    if (r.valor > 0 && r.ugRespCod !== UG_COMAE && !destinoPorNC.has(r.nc)) {
-      destinoPorNC.set(r.nc, { cod: r.ugRespCod, nome: r.ugRespNome });
+    if (r.valor > 0 && r.ugRespCod !== UG_COMAE && !destinoPorNC.has(chaveNC(r))) {
+      destinoPorNC.set(chaveNC(r), { cod: r.ugRespCod, nome: r.ugRespNome });
     }
   }
 
   // ── RESULTADO ────────────────────────────────────────────────────────────
   return registros.map((r, i) => {
     const tipoCalculado = tipos[i];
-    const destino = tipoCalculado === 'DESCENTRALIZADO' ? destinoPorNC.get(r.nc) : undefined;
+    const destino = tipoCalculado === 'DESCENTRALIZADO' ? destinoPorNC.get(chaveNC(r)) : undefined;
 
     return {
       ...r,

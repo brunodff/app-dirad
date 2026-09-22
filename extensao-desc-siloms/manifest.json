@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "COMAE — Criador de Descentralizações SILOMS",
+  "version": "1.0",
+  "description": "Cria Solicitações de Descentralização no SILOMS automaticamente a partir de planilha Excel",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "*://*.siloms.intraer/*",
+    "https://script.google.com/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_title": "Abrir painel Descentralizações"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.siloms.intraer/*"
+      ],
+      "js": ["xlsx.full.min.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "icons": {}
+}

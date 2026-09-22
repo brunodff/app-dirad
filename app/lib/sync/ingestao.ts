@@ -40,6 +40,8 @@ function parseLinhaCreditoRecord(row: Record<string, unknown>): MovimentoCredito
     origemNome:    String(row['ORIGEM_NOME']   ?? '').trim(),
     valor,
     pedido:        String(row['PEDIDO']        ?? '').trim(),
+    acaoCod:       String(row['ACAO_COD']      ?? '').trim(),
+    acaoNome:      String(row['ACAO_NOME']     ?? '').trim(),
   };
 }
 
@@ -61,12 +63,15 @@ function parseLinhEmpenhosRecord(row: Record<string, unknown>): EmpenhoRow | nul
     ugRespNome,
     ndCod:        normalizaNd(row['ND_COD']),
     ndNome:       String(row['ND_NOME']      ?? '').trim(),
+    subop:        String(row['SUBOP']        ?? '').trim() || null,
     disponivel:   parseValor(row['DISPONIVEL']),
     aLiquidar:    parseValor(row['A_LIQUIDAR']),
     emLiquidacao: parseValor(row['EM_LIQUIDACAO']),
     liqAPagar:    parseValor(row['LIQ_A_PAGAR']),
     pago:         parseValor(row['PAGO']),
     total:        parseValor(row['TOTAL']),
+    acaoCod:      String(row['ACAO_COD']     ?? '').trim(),
+    acaoNome:     String(row['ACAO_NOME']    ?? '').trim(),
   };
 }
 
@@ -189,6 +194,8 @@ export async function ingerir(
       hash_linha:      m.hashLinha,
       sync_id:         syncId,
       atualizado_em:   new Date().toISOString(),
+      acao_cod:        m.acaoCod ?? null,
+      acao_nome:       m.acaoNome ?? null,
     }));
 
     // Upsert em lotes de 500 para evitar payload excessivo
@@ -200,6 +207,18 @@ export async function ingerir(
         .upsert(lote, { onConflict: 'hash_linha', ignoreDuplicates: false });
       if (error) erros.push(`Upsert crédito lote ${i / BATCH}: ${error.message}`);
     }
+
+    // ── Purga de movimentos stale ────────────────────────────────────────────
+    // O sync envia TODOS os movimentos do exercício. Qualquer row com sync_id
+    // anterior ao atual não veio no push — foi corrigido/cancelado no SILOMS.
+    // Marcar como IGNORADO para não distorcer os totais.
+    const { error: purgeErr } = await db
+      .from('movimentos_credito')
+      .update({ tipo_calculado: 'IGNORADO', atualizado_em: new Date().toISOString() })
+      .eq('exercicio', 2026)
+      .lt('sync_id', syncId)
+      .neq('tipo_calculado', 'IGNORADO');
+    if (purgeErr) erros.push(`Purga stale: ${purgeErr.message}`);
 
     // ── Empenhos: substitui tudo (snapshot) ──────────────────────────────────
     const empRows: EmpenhoRow[] = [];
@@ -224,6 +243,7 @@ export async function ingerir(
         ug_resp_nome:  e.ugRespNome,
         nd_cod:        e.ndCod,
         nd_nome:       e.ndNome,
+        subop:         e.subop,
         disponivel:    e.disponivel,
         a_liquidar:    e.aLiquidar,
         em_liquidacao: e.emLiquidacao,
@@ -231,6 +251,8 @@ export async function ingerir(
         pago:          e.pago,
         total:         e.total,
         sync_id:       syncId,
+        acao_cod:      e.acaoCod ?? null,
+        acao_nome:     e.acaoNome ?? null,
       }));
 
       for (let i = 0; i < empDbRows.length; i += BATCH) {

@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "COMAE — SISCODEC Robô",
+  "version": "1.1.0",
+  "description": "Preenche automaticamente solicitações de descentralização no SISCODEC.",
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "COMAE SISCODEC"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
+  "icons": {
+    "16":  "icon.png",
+    "48":  "icon.png",
+    "128": "icon.png"
+  }
+}

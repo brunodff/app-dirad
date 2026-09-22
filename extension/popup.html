@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>COMAE SISCODEC</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #06101F;
+      color: #EAF1FB;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 12px;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 32px 16px;
+    }
+
+    .panel {
+      width: 400px;
+      background: #080F1F;
+      border: 1px solid #1E3050;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .header {
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid #1E3050;
+      background: #0C1526;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .header h1 { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #fff; }
+    .header p  { font-size: 9px; color: #8A97AC; margin-top: 2px; }
+
+    .btn-close {
+      background: none;
+      border: 1px solid #1E3050;
+      color: #4A5B73;
+      font-size: 12px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: color .15s, border-color .15s;
+    }
+    .btn-close:hover { color: #EAF1FB; border-color: #8A97AC; }
+
+    .offline-badge {
+      background: #2A1E06;
+      color: #E0B341;
+      border-bottom: 1px solid #E0B34122;
+      font-size: 9px;
+      padding: 6px 14px;
+      display: none;
+    }
+
+    .setup-section {
+      padding: 12px 14px;
+    }
+    .setup-section label { font-size: 9px; color: #8A97AC; text-transform: uppercase; letter-spacing: .05em; display: block; margin-bottom: 4px; }
+    .setup-section input {
+      width: 100%;
+      background: #101C33;
+      border: 1px solid #1E3050;
+      border-radius: 6px;
+      color: #EAF1FB;
+      font-size: 11px;
+      padding: 6px 8px;
+      outline: none;
+      margin-bottom: 8px;
+    }
+    .setup-section input:focus { border-color: #5FA8E0; }
+    .btn-save {
+      width: 100%;
+      background: #1E3A6E;
+      color: #5FA8E0;
+      border: 1px solid #5FA8E033;
+      border-radius: 6px;
+      padding: 7px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-save:hover { filter: brightness(1.1); }
+
+    .pedidos-section { padding: 8px 14px 14px; }
+
+    .section-title {
+      font-size: 9px;
+      color: #8A97AC;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .pedido-card {
+      background: #101C33;
+      border: 1px solid #1E3050;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+    }
+    .pedido-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .pedido-desc { font-size: 11px; font-weight: 600; color: #EAF1FB; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pedido-meta { font-size: 9px; color: #8A97AC; margin-bottom: 8px; }
+    .celulas-count { font-size: 9px; color: #5FA8E0; }
+
+    .btn-start {
+      width: 100%;
+      background: #1B3A2B;
+      color: #3FB07A;
+      border: 1px solid #3FB07A33;
+      border-radius: 6px;
+      padding: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+    }
+    .btn-start:hover { filter: brightness(1.1); }
+    .btn-start:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .status-bar {
+      background: #0C1526;
+      border: 1px solid #1E3050;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-top: 6px;
+      font-size: 10px;
+      color: #8A97AC;
+      display: none;
+    }
+    .status-bar.show { display: block; }
+    .status-bar .step { color: #EAF1FB; margin-bottom: 4px; }
+    .progress-bar { height: 3px; background: #1E3050; border-radius: 2px; margin-top: 6px; }
+    .progress-fill { height: 100%; background: #5FA8E0; border-radius: 2px; transition: width .3s; }
+
+    .empty { text-align: center; padding: 24px 0; color: #8A97AC; font-size: 11px; }
+
+    .tab-btns { display: flex; gap: 4px; margin-bottom: 10px; }
+    .tab-btn {
+      font-size: 9px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid #1E3050;
+      cursor: pointer;
+      background: #101C33;
+      color: #8A97AC;
+    }
+    .tab-btn.active { background: #1E3050; color: #EAF1FB; }
+
+    .settings-link {
+      display: block;
+      text-align: center;
+      font-size: 9px;
+      color: #3A4B63;
+      padding: 6px 0 4px;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .settings-link:hover { color: #8A97AC; }
+
+    .badge { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 20px; }
+    .badge-ok  { background: #1B3A2B; color: #3FB07A; }
+    .badge-err { background: #3A1212; color: #E06A6A; }
+    .badge-run { background: #0F2033; color: #5FA8E0;  }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="header">
+      <div>
+        <h1>COMAE — SISCODEC Robô</h1>
+        <p>Preenchimento automático de descentralizações</p>
+      </div>
+      <button class="btn-close" id="btn-fechar" title="Fechar">✕</button>
+    </div>
+
+    <div id="offline-badge" class="offline-badge">
+      ⚠ Modo offline — exibindo pedidos em cache local
+    </div>
+
+    <div id="config-panel" class="setup-section" style="display:none">
+      <label>Token de API (copie do painel COMAE)</label>
+      <input id="cfg-token" type="password" placeholder="Cole seu token aqui" />
+      <button class="btn-save" id="btn-save-cfg">Salvar token</button>
+      <a class="settings-link" id="back-link" style="margin-top:8px;display:block">← Voltar</a>
+    </div>
+
+    <div id="main-panel">
+      <div class="pedidos-section">
+        <div class="tab-btns">
+          <button class="tab-btn active" data-status="PENDENTE">Pendentes</button>
+          <button class="tab-btn" data-status="CONCLUIDO">Concluídos</button>
+          <button class="tab-btn" data-status="ERRO">Erros</button>
+        </div>
+
+        <div id="lista-pedidos">
+          <div class="empty">Carregando…</div>
+        </div>
+      </div>
+
+      <a class="settings-link" id="settings-link">⚙ Configurações</a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

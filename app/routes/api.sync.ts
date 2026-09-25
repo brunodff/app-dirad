@@ -2,13 +2,13 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
 import { ingerir, type SyncPayload } from '~/lib/sync/ingestao';
 
 function getToken(context: unknown): string {
-  // Primary: load context injected by getLoadContext in functions/[[path]].ts
   const ctxEnv = (context as any)?.cloudflare?.env;
-  if (ctxEnv?.SYNC_SECRET_TOKEN) return ctxEnv.SYNC_SECRET_TOKEN;
-  // Fallback: globalThis (set from same getLoadContext) or process.env (local dev)
-  return (globalThis as any).__cfEnv__?.SYNC_SECRET_TOKEN
-      ?? process.env['SYNC_SECRET_TOKEN']
-      ?? '';
+  if (ctxEnv?.SYNC_SECRET_TOKEN) return String(ctxEnv.SYNC_SECRET_TOKEN).trim();
+  return (
+    (globalThis as any).__cfEnv__?.SYNC_SECRET_TOKEN
+    ?? process.env['SYNC_SECRET_TOKEN']
+    ?? ''
+  ).trim();
 }
 
 async function handlePost(request: Request, context: unknown): Promise<Response> {

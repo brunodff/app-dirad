@@ -10,9 +10,9 @@ const ENV_KEYS = [
 // @ts-ignore
 const handleRequest = createRequestHandler({
   build,
-  getLoadContext: (context: any) => {
-    // Copy known keys to a plain object — context.env may be a restricted Proxy.
-    const cfEnv = context.env ?? {};
+  // getLoadContext receives { request, context } where context.cloudflare is the Pages EventContext.
+  getLoadContext: ({ context }: any) => {
+    const cfEnv = context?.cloudflare?.env ?? {};
     const env: Record<string, string> = {};
     for (const k of ENV_KEYS) {
       const v = cfEnv[k];

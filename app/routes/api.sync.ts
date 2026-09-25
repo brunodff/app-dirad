@@ -1,17 +1,17 @@
-/**
- * POST /api/sync
- * Recebe os dados do Apps Script (BD_CREDITO + BD_EMPENHOS) e aciona a ingestão.
- * Protegido por token secreto (SYNC_SECRET_TOKEN).
- *
- * Nota: handlePost é chamado tanto pelo action (POST direto) quanto pelo loader
- * (fallback para quando há redirect automático de POST→GET em alguns ambientes).
- */
-
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
 import { ingerir, type SyncPayload } from '~/lib/sync/ingestao';
-import { optEnv } from '~/lib/env.server';
 
-async function handlePost(request: Request): Promise<Response> {
+function getToken(context: unknown): string {
+  // Primary: load context injected by getLoadContext in functions/[[path]].ts
+  const ctxEnv = (context as any)?.cloudflare?.env;
+  if (ctxEnv?.SYNC_SECRET_TOKEN) return ctxEnv.SYNC_SECRET_TOKEN;
+  // Fallback: globalThis (set from same getLoadContext) or process.env (local dev)
+  return (globalThis as any).__cfEnv__?.SYNC_SECRET_TOKEN
+      ?? process.env['SYNC_SECRET_TOKEN']
+      ?? '';
+}
+
+async function handlePost(request: Request, context: unknown): Promise<Response> {
   let body: Record<string, unknown>;
   try {
     body = await request.json();
@@ -19,20 +19,9 @@ async function handlePost(request: Request): Promise<Response> {
     return Response.json({ error: 'JSON inválido' }, { status: 400 });
   }
 
-  const token = optEnv('SYNC_SECRET_TOKEN');
+  const token = getToken(context);
   if (!token || body['token'] !== token) {
-    const cfEnv = (globalThis as any).__cfEnv__;
-    return Response.json({
-      error: 'Não autorizado',
-      _debug: {
-        hasCfEnv: !!cfEnv,
-        cfEnvKeys: cfEnv ? Object.keys(cfEnv) : [],
-        hasToken: !!token,
-        tokenLen: token.length,
-        bodyTokenLen: typeof body['token'] === 'string' ? (body['token'] as string).length : -1,
-        match: token === body['token'],
-      },
-    }, { status: 401 });
+    return Response.json({ error: 'Não autorizado' }, { status: 401 });
   }
 
   const credito  = body['credito'];
@@ -67,17 +56,16 @@ async function handlePost(request: Request): Promise<Response> {
   }
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ request, context }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
-  return handlePost(request);
+  return handlePost(request, context);
 }
 
-// Aceita POST no loader como fallback (cobre redirect POST→GET em alguns ambientes)
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
   if (request.method === 'POST') {
-    return handlePost(request);
+    return handlePost(request, context);
   }
   return Response.json({ status: 'ready', endpoint: '/api/sync', info: 'Use POST to sync' });
 }

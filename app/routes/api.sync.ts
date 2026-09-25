@@ -21,7 +21,18 @@ async function handlePost(request: Request): Promise<Response> {
 
   const token = optEnv('SYNC_SECRET_TOKEN');
   if (!token || body['token'] !== token) {
-    return Response.json({ error: 'Não autorizado' }, { status: 401 });
+    const cfEnv = (globalThis as any).__cfEnv__;
+    return Response.json({
+      error: 'Não autorizado',
+      _debug: {
+        hasCfEnv: !!cfEnv,
+        cfEnvKeys: cfEnv ? Object.keys(cfEnv) : [],
+        hasToken: !!token,
+        tokenLen: token.length,
+        bodyTokenLen: typeof body['token'] === 'string' ? (body['token'] as string).length : -1,
+        match: token === body['token'],
+      },
+    }, { status: 401 });
   }
 
   const credito  = body['credito'];

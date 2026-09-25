@@ -21,7 +21,17 @@ async function handlePost(request: Request, context: unknown): Promise<Response>
 
   const token = getToken(context);
   if (!token || body['token'] !== token) {
-    return Response.json({ error: 'Não autorizado' }, { status: 401 });
+    return Response.json({
+      error: 'Não autorizado',
+      _d: {
+        tokenLen: token.length,
+        bodyTokenLen: String(body['token']).length,
+        hasCfEnv: !!(globalThis as any).__cfEnv__,
+        cfEnvHasToken: !!(globalThis as any).__cfEnv__?.SYNC_SECRET_TOKEN,
+        ctxHasCloudflare: !!(context as any)?.cloudflare,
+        ctxEnvHasToken: !!(context as any)?.cloudflare?.env?.SYNC_SECRET_TOKEN,
+      },
+    }, { status: 401 });
   }
 
   const credito  = body['credito'];

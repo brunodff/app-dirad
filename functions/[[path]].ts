@@ -7,10 +7,15 @@ import * as build from "../build/server/index.js";
 const handleRequest = createRequestHandler({ build });
 
 export const onRequest: PagesFunction = async (context) => {
-  // Cloudflare env bindings are not on process.env by default — copy them over.
-  const cfEnv = context.env as Record<string, unknown>;
-  for (const [k, v] of Object.entries(cfEnv)) {
-    if (typeof v === "string" && !process.env[k]) process.env[k] = v;
+  // Cloudflare secrets are not enumerable via Object.entries — access by name explicitly.
+  const cfEnv = context.env as any;
+  const knownKeys = [
+    "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY",
+    "SYNC_SECRET_TOKEN", "SESSION_SECRET", "NODE_ENV",
+    "API_CORS_ORIGIN", "API_SECRET",
+  ];
+  for (const k of knownKeys) {
+    if (typeof cfEnv[k] === "string") process.env[k] = cfEnv[k];
   }
 
   try {

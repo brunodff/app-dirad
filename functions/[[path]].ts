@@ -25,6 +25,11 @@ const handleRequest = createRequestHandler({
 });
 
 export const onRequest: PagesFunction = async (context) => {
+  // Temporary: log what keys are in context.env so we can confirm secrets are present.
+  const cfKeys = Object.keys(context.env as any);
+  const hasSyncToken = !!(context.env as any)["SYNC_SECRET_TOKEN"];
+  console.log("[onRequest] context.env keys:", cfKeys, "| hasSyncToken:", hasSyncToken);
+
   try {
     // @ts-ignore
     return await handleRequest(context);

@@ -17,7 +17,7 @@ export const onRequest: PagesFunction = async (context) => {
   const env: Record<string, string> = {};
   for (const k of ENV_KEYS) {
     const v = cfEnv[k];
-    if (typeof v === "string") env[k] = v;
+    if (typeof v === "string") env[k] = v.trim();
   }
   (globalThis as any).__cfEnv__ = env;
 

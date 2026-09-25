@@ -27,7 +27,7 @@ export type SessionData = {
   nome: string;
 };
 
-type SessionStore = Awaited<ReturnType<typeof storage().getSession>>;
+type SessionStore = Awaited<ReturnType<ReturnType<typeof createCookieSessionStorage>['getSession']>>;
 
 export async function getSession(request: Request): Promise<SessionStore> {
   return storage().getSession(request.headers.get('Cookie'));

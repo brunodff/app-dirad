@@ -9,6 +9,7 @@
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
 import { ingerir, type SyncPayload } from '~/lib/sync/ingestao';
+import { optEnv } from '~/lib/env.server';
 
 async function handlePost(request: Request): Promise<Response> {
   let body: Record<string, unknown>;
@@ -18,7 +19,7 @@ async function handlePost(request: Request): Promise<Response> {
     return Response.json({ error: 'JSON inválido' }, { status: 400 });
   }
 
-  const token = process.env['SYNC_SECRET_TOKEN'];
+  const token = optEnv('SYNC_SECRET_TOKEN');
   if (!token || body['token'] !== token) {
     return Response.json({ error: 'Não autorizado' }, { status: 401 });
   }

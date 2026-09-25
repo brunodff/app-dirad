@@ -7,16 +7,8 @@ import * as build from "../build/server/index.js";
 const handleRequest = createRequestHandler({ build });
 
 export const onRequest: PagesFunction = async (context) => {
-  // Cloudflare secrets are not enumerable via Object.entries — access by name explicitly.
-  const cfEnv = context.env as any;
-  const knownKeys = [
-    "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY",
-    "SYNC_SECRET_TOKEN", "SESSION_SECRET", "NODE_ENV",
-    "API_CORS_ORIGIN", "API_SECRET",
-  ];
-  for (const k of knownKeys) {
-    if (typeof cfEnv[k] === "string") process.env[k] = cfEnv[k];
-  }
+  // Make Cloudflare env available to server code via globalThis (process.env is read-only in Workers).
+  (globalThis as any).__cfEnv__ = context.env;
 
   try {
     // Pass Pages Function context directly — it has .request, .env, .waitUntil

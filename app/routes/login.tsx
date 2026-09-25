@@ -3,6 +3,7 @@ import { Form, redirect, useActionData, useNavigation } from 'react-router';
 import { createClient } from '@supabase/supabase-js';
 import { getSession, commitSession, type SessionData } from '~/lib/session.server';
 import { supabaseAdmin } from '~/lib/supabase.server';
+import { optEnv } from '~/lib/env.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request);
@@ -19,8 +20,8 @@ export async function action({ request }: ActionFunctionArgs) {
     return { erro: 'Preencha e-mail e senha.' };
   }
 
-  const supabaseUrl = process.env['SUPABASE_URL'];
-  const supabaseAnonKey = process.env['SUPABASE_ANON_KEY'];
+  const supabaseUrl = optEnv('SUPABASE_URL');
+  const supabaseAnonKey = optEnv('SUPABASE_ANON_KEY');
   if (!supabaseUrl || !supabaseAnonKey) {
     return { erro: 'Configuração de servidor incompleta. Contate o administrador.' };
   }

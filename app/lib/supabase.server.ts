@@ -1,10 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-
-function getEnv(key: string): string {
-  const v = process.env[key];
-  if (!v) throw new Error(`Variável de ambiente ausente: ${key}`);
-  return v;
-}
+import { getEnv } from '~/lib/env.server';
 
 /**
  * Client com service role — para operações de servidor (API routes, sync).

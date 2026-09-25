@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
 import { redirect, useLoaderData } from 'react-router';
+import { optEnv } from '~/lib/env.server';
 import { useEffect } from 'react';
 import { usePresenca } from '~/lib/usePresenca';
 import { requireUser, getSession, commitSession } from '~/lib/session.server';
@@ -465,8 +466,8 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!destinatario || !destinatario.includes('@')) {
       return Response.json({ erro: 'Informe um email de destinatário válido.' }, { status: 400 });
     }
-    const resendKey  = process.env['RESEND_API_KEY'] ?? '';
-    const resendFrom = process.env['RESEND_FROM'] ?? 'COMAE GERENCIAL <noreply@comaegerencial.app>';
+    const resendKey  = optEnv('RESEND_API_KEY');
+    const resendFrom = optEnv('RESEND_FROM', 'COMAE GERENCIAL <noreply@comaegerencial.app>');
     if (!resendKey) return Response.json({ erro: 'Email não configurado no servidor' }, { status: 500 });
 
     const dataFmt  = new Date(`${sol.data_oficio}T00:00:00`).toLocaleDateString('pt-BR');
@@ -563,8 +564,8 @@ export async function action({ request }: ActionFunctionArgs) {
       .single();
     if (!pedido) return Response.json({ erro: 'Pedido não encontrado' }, { status: 404 });
 
-    const resendKey  = process.env['RESEND_API_KEY'] ?? '';
-    const resendFrom = process.env['RESEND_FROM'] ?? 'COMAE GERENCIAL <noreply@comaegerencial.app>';
+    const resendKey  = optEnv('RESEND_API_KEY');
+    const resendFrom = optEnv('RESEND_FROM', 'COMAE GERENCIAL <noreply@comaegerencial.app>');
     if (!resendKey) return Response.json({ erro: 'Email não configurado no servidor' }, { status: 500 });
 
     let cfg: Record<string, string> = {};
@@ -719,7 +720,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (existe) return Response.json({ erro: 'Este e-mail já está cadastrado.' }, { status: 400 });
 
     // Gera o link de convite sem enviar e-mail pelo Supabase
-    const appUrl = process.env['APP_URL'] ?? 'https://comaegerencial.app';
+    const appUrl = optEnv('APP_URL', 'https://comaegerencial.app');
     const { data: linkData, error: linkErr } = await db.auth.admin.generateLink({
       type: 'invite',
       email,
@@ -740,8 +741,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Envia e-mail de convite via Resend
     const actionLink = linkData.properties?.action_link ?? '';
-    const resendKey  = process.env['RESEND_API_KEY'] ?? '';
-    const resendFrom = process.env['RESEND_FROM'] ?? 'COMAE GERENCIAL <noreply@comaegerencial.app>';
+    const resendKey  = optEnv('RESEND_API_KEY');
+    const resendFrom = optEnv('RESEND_FROM', 'COMAE GERENCIAL <noreply@comaegerencial.app>');
 
     if (resendKey && actionLink) {
       const html = buildConviteHtml({ email, actionLink, perfil: novoPerfil, convidadoPor: user.nome });
@@ -1367,8 +1368,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     podeEditar: PODE_EDITAR.includes(user.perfil),
     empenhoRows, ultimaSync, quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
     movimentosDescartados, siscodecPedidos, apiToken, usuariosGerencial, solicitacoes, proximoNumDesc, modelos,
-    supabaseUrl: process.env['SUPABASE_URL']      ?? '',
-    anonKey:     process.env['SUPABASE_ANON_KEY'] ?? '',
+    supabaseUrl: optEnv('SUPABASE_URL'),
+    anonKey:     optEnv('SUPABASE_ANON_KEY'),
   };
 }
 

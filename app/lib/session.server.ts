@@ -1,16 +1,22 @@
 import { createCookieSessionStorage, redirect } from 'react-router';
+import { optEnv } from '~/lib/env.server';
 
-const sessionStorage = createCookieSessionStorage({
-  cookie: {
-    name: '__comae_session',
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 60 * 60 * 24 * 7, // 7 dias
-    secrets: [process.env['SESSION_SECRET'] ?? 'dev-secret-change-me'],
-  },
-});
+// Lazy so env vars are read after Cloudflare context is set (not at module load time).
+let _storage: ReturnType<typeof createCookieSessionStorage> | null = null;
+
+function storage() {
+  return (_storage ??= createCookieSessionStorage({
+    cookie: {
+      name: '__comae_session',
+      httpOnly: true,
+      secure: optEnv('NODE_ENV') === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7,
+      secrets: [optEnv('SESSION_SECRET', 'dev-secret-change-me')],
+    },
+  }));
+}
 
 export type SessionData = {
   access_token: string;
@@ -21,18 +27,18 @@ export type SessionData = {
   nome: string;
 };
 
-type SessionStore = Awaited<ReturnType<typeof sessionStorage.getSession>>;
+type SessionStore = Awaited<ReturnType<typeof storage().getSession>>;
 
 export async function getSession(request: Request): Promise<SessionStore> {
-  return sessionStorage.getSession(request.headers.get('Cookie'));
+  return storage().getSession(request.headers.get('Cookie'));
 }
 
 export async function commitSession(session: SessionStore): Promise<string> {
-  return sessionStorage.commitSession(session);
+  return storage().commitSession(session);
 }
 
 export async function destroySession(session: SessionStore): Promise<string> {
-  return sessionStorage.destroySession(session);
+  return storage().destroySession(session);
 }
 
 export async function getUser(request: Request): Promise<SessionData | null> {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FilterBar, type FiltrosAtivos, type OpcoesFiltro } from './FilterBar';
 import { apelidoOperacao } from '~/lib/apelidoOperacao';
+import { Conciliacao } from './Conciliacao';
 
 export type EmpenhoDbRow = {
   operacao: string;
@@ -380,13 +381,15 @@ const TABLE_HEADERS = ['ND / Grupo', 'Disponível', 'A Liquidar', 'Em Liquidaç�
 
 type Props = {
   rows: EmpenhoDbRow[];
+  /** Descentralizado × crédito nas unidades para o recorte atual (null se há filtros além de operação). */
+  conciliacao: { descentralizado: number; nasUnidades: number } | null;
   filtrosAtivos: FiltrosAtivos;
   opcoes: OpcoesFiltro;
   ultimaSync: string | null;
 };
 
 
-export function ExecucaoView({ rows, filtrosAtivos, opcoes, ultimaSync }: Props) {
+export function ExecucaoView({ rows, conciliacao, filtrosAtivos, opcoes, ultimaSync }: Props) {
   const [visao, setVisao] = useState<'comae' | 'unidades'>('comae');
   const [soComCredito, setSoComCredito] = useState(false);
 
@@ -454,6 +457,14 @@ export function ExecucaoView({ rows, filtrosAtivos, opcoes, ultimaSync }: Props)
         <div className="px-5 py-4 border-b space-y-3" style={{ borderColor: '#1E3050', background: '#080F1F' }}>
           <SummaryCards total={totalGeral} />
           <PhaseBar total={totalGeral} />
+          {visao === 'unidades' && !soComCredito && conciliacao && (
+            <Conciliacao
+              descentralizado={conciliacao.descentralizado}
+              nasUnidades={conciliacao.nasUnidades}
+              execucaoTotal={totalGeral.total}
+              className="max-w-md"
+            />
+          )}
         </div>
       )}
 

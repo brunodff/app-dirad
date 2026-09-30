@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useFetcher } from 'react-router';
 import { FilterBar, type FiltrosAtivos, type OpcoesFiltro } from './FilterBar';
 import { apelidoOperacao } from '~/lib/apelidoOperacao';
+import { Conciliacao } from './Conciliacao';
 
 export type ResumoRow = {
   operacao: string;
@@ -99,36 +100,6 @@ function ConfirmarDesativar({
   );
 }
 
-const MOV_DIRETA_TITLE =
-  'Crédito que entrou ou saiu das unidades sem passar pelo COMAE: remanejamentos e ' +
-  'recolhimentos feitos pelas unidades, entradas diretas do EMAER, correções de UGR.';
-
-/** Descentralizado ± movimentação direta das unidades = Nas unidades (aba Execução). */
-function Conciliacao({ descentralizado, nasUnidades }: { descentralizado: number; nasUnidades: number }) {
-  const movDireta = Math.round((nasUnidades - descentralizado) * 100) / 100;
-  const temMov = Math.abs(movDireta) >= 0.01;
-  return (
-    <div className="rounded-lg px-3 py-2 mb-4 text-[11px] tabular-nums space-y-1" style={{ background: '#0C1526', border: '1px solid #1E3050' }}>
-      <div className="flex justify-between gap-2">
-        <span className="text-slate-500">Descentralizado pelo COMAE</span>
-        <span className="text-slate-300">{brl(descentralizado)}</span>
-      </div>
-      {temMov && (
-        <div className="flex justify-between gap-2" title={MOV_DIRETA_TITLE}>
-          <span className="text-slate-500 underline decoration-dotted cursor-help">Mov. direta das unidades</span>
-          <span style={{ color: movDireta < 0 ? '#E06A6A' : '#3FB07A' }}>
-            {movDireta > 0 ? '+' : '−'}{brl(Math.abs(movDireta))}
-          </span>
-        </div>
-      )}
-      <div className="flex justify-between gap-2 pt-1" style={{ borderTop: '1px solid #1E3050' }}>
-        <span className="text-slate-400 font-semibold">Nas unidades</span>
-        <span className="text-white font-semibold">{brl(nasUnidades)}</span>
-      </div>
-    </div>
-  );
-}
-
 function OperacaoCard({
   row,
   podeEditar,
@@ -177,7 +148,7 @@ function OperacaoCard({
       </div>
 
       {row.nas_unidades !== undefined && (
-        <Conciliacao descentralizado={row.descentralizado} nasUnidades={row.nas_unidades} />
+        <Conciliacao descentralizado={row.descentralizado} nasUnidades={row.nas_unidades} className="mb-4" />
       )}
 
       <div className="space-y-2">

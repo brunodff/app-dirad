@@ -960,6 +960,28 @@ export async function action({ request }: ActionFunctionArgs) {
   return Response.json({ erro: 'Intent inválido' }, { status: 400 });
 }
 
+/**
+ * Crédito líquido nas unidades por operação = soma de todas as pernas fora do COMAE
+ * no último sync (inclui as IGNORADO). Bate com o total "Unidades" da aba Execução e
+ * permite conciliar: Descentralizado ± movimentação direta das unidades = Nas unidades.
+ */
+async function creditoNasUnidades(db: ReturnType<typeof supabaseAdmin>): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  const { data: ultimoSync } = await db.from('movimentos_credito').select('sync_id')
+    .order('sync_id', { ascending: false }).limit(1).maybeSingle();
+  const ultimoSyncId = (ultimoSync as { sync_id?: number } | null)?.sync_id;
+  if (ultimoSyncId == null) return map;
+  const { data: pernas } = await fetchAll<{ operacao: string; valor: number }>(() => db
+    .from('movimentos_credito')
+    .select('operacao, valor')
+    .eq('sync_id', ultimoSyncId)
+    .neq('ug_resp_cod', UG_COMAE)
+    .order('id'));
+  for (const r of pernas) map.set(r.operacao, (map.get(r.operacao) ?? 0) + Number(r.valor));
+  for (const [k, v] of map) map.set(k, Math.round(v * 100) / 100);
+  return map;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireUser(request);
   const url  = new URL(request.url);
@@ -1019,6 +1041,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let atividadeHoje: NavegacaoRow[]     = [];
   let desativadas:   ConfigOperacao[]   = [];
   let empenhoRows:            EmpenhoDbRow[]         = [];
+  let conciliacaoExec: { descentralizado: number; nasUnidades: number } | null = null;
   let quadros:                Quadro[]               = [];
   let quadroAtivo:            Quadro | null          = null;
   let rascunhoItens:          RascunhoItem[]         = [];
@@ -1123,24 +1146,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .not('acao_cod', 'is', null)
       .order('id'));
 
-    // Crédito líquido nas unidades = soma de todas as pernas fora do COMAE no último sync
-    // (inclui as IGNORADO). Bate com o total "Unidades" da aba Execução e permite conciliar:
-    // Descentralizado ± movimentação direta das unidades = Nas unidades.
-    const { data: ultimoSync } = await db.from('movimentos_credito').select('sync_id')
-      .order('sync_id', { ascending: false }).limit(1).maybeSingle();
-    const ultimoSyncId = (ultimoSync as { sync_id?: number } | null)?.sync_id;
-    const nasUnidadesMap = new Map<string, number>();
-    if (ultimoSyncId != null) {
-      const { data: pernasUnid } = await fetchAll<{ operacao: string; valor: number }>(() => db
-        .from('movimentos_credito')
-        .select('operacao, valor')
-        .eq('sync_id', ultimoSyncId)
-        .neq('ug_resp_cod', UG_COMAE)
-        .order('id'));
-      for (const r of pernasUnid) {
-        nasUnidadesMap.set(r.operacao, (nasUnidadesMap.get(r.operacao) ?? 0) + Number(r.valor));
-      }
-    }
+    const nasUnidadesMap = await creditoNasUnidades(db);
 
     const acoesOpMap = new Map<string, { cod: string; nome: string }>();
     for (const r of (acoesOpRaw ?? [])) {
@@ -1155,8 +1161,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .filter(r => filtrosAtivos.ops.length === 0 || filtrosAtivos.ops.includes(r.operacao))
       .map(r => {
         const acao = acoesOpMap.get(r.operacao);
-        const nasUnidades = Math.round((nasUnidadesMap.get(r.operacao) ?? 0) * 100) / 100;
-        return { ...r, acao_cod: acao?.cod ?? null, acao_nome: acao?.nome ?? null, nas_unidades: nasUnidades };
+        return { ...r, acao_cod: acao?.cod ?? null, acao_nome: acao?.nome ?? null, nas_unidades: nasUnidadesMap.get(r.operacao) ?? 0 };
       });
 
     opcoesFiltro = {
@@ -1217,6 +1222,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     opcoesFiltro = { operacoes: opsDispExec, nds: ndsDispExec, ugExecs: ugExecsDisp, ugResps: ugRespsDisp, acoes: acoesDisp };
 
     empenhoRows = allRows;
+
+    // Conciliação (modo Unidades): só faz sentido quando o recorte é por operação
+    const soFiltroOps = filtrosAtivos.nds.length === 0 && (filtrosAtivos.ugExecs ?? []).length === 0
+      && (filtrosAtivos.ugResps ?? []).length === 0 && (filtrosAtivos.acoes ?? []).length === 0;
+    if (soFiltroOps) {
+      const [{ data: resumoDesc }, nasUnidadesMap] = await Promise.all([
+        db.from('resumo_por_operacao').select('operacao, descentralizado'),
+        creditoNasUnidades(db),
+      ]);
+      const incluiOp = (op: string) => !opsDesativadas.includes(op)
+        && (filtrosAtivos.ops.length === 0 || filtrosAtivos.ops.includes(op));
+      let descentralizado = 0;
+      for (const r of (resumoDesc ?? []) as { operacao: string; descentralizado: number }[]) {
+        if (incluiOp(r.operacao)) descentralizado += Number(r.descentralizado ?? 0);
+      }
+      let nasUnidades = 0;
+      for (const [op, v] of nasUnidadesMap) if (incluiOp(op)) nasUnidades += v;
+      conciliacaoExec = { descentralizado, nasUnidades };
+    }
 
     ultimaSync = String((syncRaw as { concluido_em?: unknown } | null)?.concluido_em ?? '') || null;
   }
@@ -1401,7 +1425,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     movimentos, totaisGlobais, resumo, desativadas,
     usuarios, syncLogs, navegacoes, atividadeHoje,
     podeEditar: PODE_EDITAR.includes(user.perfil),
-    empenhoRows, ultimaSync, quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
+    empenhoRows, conciliacaoExec, ultimaSync, quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
     movimentosDescartados, siscodecPedidos, apiToken, usuariosGerencial, solicitacoes, proximoNumDesc, modelos,
     supabaseUrl: optEnv('SUPABASE_URL'),
     anonKey:     optEnv('SUPABASE_ANON_KEY'),
@@ -1435,7 +1459,7 @@ export default function Painel() {
     user, aba, filtrosAtivos, opcoesFiltro,
     movimentos, totaisGlobais, resumo, desativadas,
     usuarios, syncLogs, navegacoes, atividadeHoje,
-    podeEditar, empenhoRows, ultimaSync,
+    podeEditar, empenhoRows, conciliacaoExec, ultimaSync,
     quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
     movimentosDescartados, siscodecPedidos, apiToken, usuariosGerencial, solicitacoes, proximoNumDesc, modelos,
     supabaseUrl, anonKey,
@@ -1459,7 +1483,7 @@ export default function Painel() {
           />
         );
       case 'execucao':
-        return <ExecucaoView rows={empenhoRows} filtrosAtivos={filtrosAtivos} opcoes={opcoesFiltro} ultimaSync={ultimaSync} />;
+        return <ExecucaoView rows={empenhoRows} conciliacao={conciliacaoExec} filtrosAtivos={filtrosAtivos} opcoes={opcoesFiltro} ultimaSync={ultimaSync} />;
       case 'rascunho':
         return (
           <RascunhoView

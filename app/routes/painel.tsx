@@ -1038,12 +1038,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
       filtrosAtivos.tipos.length > 0 || !!filtrosAtivos.dataDe || !!filtrosAtivos.dataAte ||
       filtrosAtivos.ugExecs.length > 0 || filtrosAtivos.ugResps.length > 0 || filtrosAtivos.ugDestinos.length > 0;
 
+    // "Entre unidades" (IGNORADO) só aparece quando pedido no filtro de tipo, e apenas
+    // do último sync — linhas de syncs anteriores foram purgadas e não são movimentos reais.
+    let ultimoSyncId: number | null = null;
+    if (filtrosAtivos.tipos.includes('IGNORADO')) {
+      const { data: us } = await db.from('movimentos_credito').select('sync_id')
+        .order('sync_id', { ascending: false }).limit(1).maybeSingle();
+      ultimoSyncId = (us as { sync_id?: number } | null)?.sync_id ?? null;
+    }
+
     const buildFeed = () => {
       let query = db
         .from('movimentos_credito')
         .select('id, operacao, tipo_calculado, nd_cod, nd_nome, nc, data, valor, descricao, ug_exec_cod, ug_exec_nome, ug_resp_nome, ug_destino_nome, subop, pedido, favorecido_nome, acao_cod, acao_nome')
-        .eq('exercicio', 2026)
-        .neq('tipo_calculado', 'IGNORADO')
+        .eq('exercicio', 2026);
+      query = ultimoSyncId != null
+        ? query.or(`tipo_calculado.neq.IGNORADO,sync_id.eq.${ultimoSyncId}`)
+        : query.neq('tipo_calculado', 'IGNORADO');
+      query = query
         .order('data', { ascending: false })
         .order('id', { ascending: false });
 

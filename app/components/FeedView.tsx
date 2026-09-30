@@ -37,6 +37,7 @@ const TIPO_META: Record<string, { label: string; cor: string; valorCor: string }
   DESCENTRALIZADO:   { label: 'Descentralizado', cor: '#3A2C0C', valorCor: '#E0B341' },
   DEVOLUCAO:         { label: 'Devolução',       cor: '#3A1212', valorCor: '#E06A6A' },
   RECEBIDO_UNIDADES: { label: 'Rec. Unidades',   cor: '#0F2A2A', valorCor: '#25A3A3' },
+  IGNORADO:          { label: 'Entre unidades',  cor: '#1E2533', valorCor: '#8A94A6' },
 };
 
 function brl(v: number) {
@@ -56,7 +57,10 @@ function formatDataLonga(iso: string) {
 function MovimentoCard({ m, podeEditar }: { m: MovimentoRow; podeEditar: boolean }) {
   const meta = TIPO_META[m.tipo_calculado] ?? TIPO_META.RECEBIDO;
   const ndColor = ND_COLORS[m.nd_cod] ?? '#8A97AC';
-  const sinal = m.tipo_calculado === 'DESCENTRALIZADO' ? '-' : '+';
+  const entreUnidades = m.tipo_calculado === 'IGNORADO';
+  const sinal = entreUnidades
+    ? (m.valor < 0 ? '-' : '+')
+    : m.tipo_calculado === 'DESCENTRALIZADO' ? '-' : '+';
   const [mostrando, setMostrando] = useState(false);
   const [motivo, setMotivo] = useState('');
   const [detalhes, setDetalhes] = useState(false);
@@ -112,6 +116,9 @@ function MovimentoCard({ m, podeEditar }: { m: MovimentoRow; podeEditar: boolean
           </div>
 
           <div className="text-[10px] text-slate-500 flex gap-2 flex-wrap">
+            {entreUnidades && m.ug_exec_nome && (
+              <span className="text-slate-400" title="UG onde o lançamento ocorreu">{m.ug_exec_nome} ·</span>
+            )}
             <span title="UG Responsável">{m.ug_resp_nome}</span>
             {m.ug_destino_nome && m.tipo_calculado === 'DESCENTRALIZADO' && (
               <span className="text-slate-600">→ {m.ug_destino_nome}</span>

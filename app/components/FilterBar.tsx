@@ -28,7 +28,10 @@ const TIPOS_OPCOES = [
   { value: 'DESCENTRALIZADO',   label: 'Descentralizado', cor: '#E0B341' },
   { value: 'DEVOLUCAO',         label: 'Devolução',       cor: '#E06A6A' },
   { value: 'RECEBIDO_UNIDADES', label: 'Rec. Unidades',   cor: '#25A3A3' },
+  { value: 'IGNORADO',          label: 'Entre unidades',  cor: '#8A94A6' },
 ];
+
+const semAcento = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 function hoje(): string {
   return new Date().toISOString().slice(0, 10);
@@ -88,8 +91,9 @@ function MultiDropdown({
     else onChange([...selecionados, val]);
   }
 
-  const opcoesFiltradas = busca.trim()
-    ? opcoes.filter(op => op.label.toLowerCase().includes(busca.toLowerCase()))
+  const termo = semAcento(busca.trim());
+  const opcoesFiltradas = termo
+    ? opcoes.filter(op => semAcento(op.label).includes(termo) || semAcento(op.value).includes(termo))
     : opcoes;
 
   return (
@@ -254,7 +258,9 @@ export function FilterBar({ aba, opcoes, filtrosAtivos, mostrarDatas = true }: P
     setPendDataAte(ate);
   }
 
-  const opsOpcoes = opcoes.operacoes.map(op => ({ value: op, label: apelidoOperacao(op) }));
+  const opsOpcoes = opcoes.operacoes
+    .map(op => ({ value: op, label: apelidoOperacao(op) }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
   const ndsOpcoes = opcoes.nds.map(nd => ({ value: nd.cod, label: `${nd.cod} — ${nd.nome}` }));
 
   return (

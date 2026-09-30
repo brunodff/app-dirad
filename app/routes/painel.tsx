@@ -22,6 +22,7 @@ import { Tutorial } from '~/components/Tutorial';
 import { CONFIG_PADRAO as SISCODEC_CONFIG_PADRAO } from '~/lib/siscodec-doc-config';
 import { gerarSiscodecPDF } from '~/lib/gerar-siscodec-pdf.server';
 import { classificar } from '~/lib/engine/classificar';
+import { UG_COMAE } from '~/lib/engine/regras';
 import type { MovimentoCredito, ConfigEngine } from '~/lib/engine/types';
 
 function buildConviteHtml({ email, actionLink, perfil, convidadoPor }: {
@@ -1038,24 +1039,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       filtrosAtivos.tipos.length > 0 || !!filtrosAtivos.dataDe || !!filtrosAtivos.dataAte ||
       filtrosAtivos.ugExecs.length > 0 || filtrosAtivos.ugResps.length > 0 || filtrosAtivos.ugDestinos.length > 0;
 
-    // "Entre unidades" (IGNORADO) só aparece quando pedido no filtro de tipo, e apenas
-    // do último sync — linhas de syncs anteriores foram purgadas e não são movimentos reais.
-    let ultimoSyncId: number | null = null;
-    if (filtrosAtivos.tipos.includes('IGNORADO')) {
-      const { data: us } = await db.from('movimentos_credito').select('sync_id')
-        .order('sync_id', { ascending: false }).limit(1).maybeSingle();
-      ultimoSyncId = (us as { sync_id?: number } | null)?.sync_id ?? null;
-    }
-
     const buildFeed = () => {
       let query = db
         .from('movimentos_credito')
         .select('id, operacao, tipo_calculado, nd_cod, nd_nome, nc, data, valor, descricao, ug_exec_cod, ug_exec_nome, ug_resp_nome, ug_destino_nome, subop, pedido, favorecido_nome, acao_cod, acao_nome')
-        .eq('exercicio', 2026);
-      query = ultimoSyncId != null
-        ? query.or(`tipo_calculado.neq.IGNORADO,sync_id.eq.${ultimoSyncId}`)
-        : query.neq('tipo_calculado', 'IGNORADO');
-      query = query
+        .eq('exercicio', 2026)
+        .neq('tipo_calculado', 'IGNORADO')
         .order('data', { ascending: false })
         .order('id', { ascending: false });
 
@@ -1134,6 +1123,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .not('acao_cod', 'is', null)
       .order('id'));
 
+    // Crédito líquido nas unidades = soma de todas as pernas fora do COMAE no último sync
+    // (inclui as IGNORADO). Bate com o total "Unidades" da aba Execução e permite conciliar:
+    // Descentralizado ± movimentação direta das unidades = Nas unidades.
+    const { data: ultimoSync } = await db.from('movimentos_credito').select('sync_id')
+      .order('sync_id', { ascending: false }).limit(1).maybeSingle();
+    const ultimoSyncId = (ultimoSync as { sync_id?: number } | null)?.sync_id;
+    const nasUnidadesMap = new Map<string, number>();
+    if (ultimoSyncId != null) {
+      const { data: pernasUnid } = await fetchAll<{ operacao: string; valor: number }>(() => db
+        .from('movimentos_credito')
+        .select('operacao, valor')
+        .eq('sync_id', ultimoSyncId)
+        .neq('ug_resp_cod', UG_COMAE)
+        .order('id'));
+      for (const r of pernasUnid) {
+        nasUnidadesMap.set(r.operacao, (nasUnidadesMap.get(r.operacao) ?? 0) + Number(r.valor));
+      }
+    }
+
     const acoesOpMap = new Map<string, { cod: string; nome: string }>();
     for (const r of (acoesOpRaw ?? [])) {
       if (r.acao_cod && !acoesOpMap.has(r.operacao)) {
@@ -1147,7 +1155,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .filter(r => filtrosAtivos.ops.length === 0 || filtrosAtivos.ops.includes(r.operacao))
       .map(r => {
         const acao = acoesOpMap.get(r.operacao);
-        return { ...r, acao_cod: acao?.cod ?? null, acao_nome: acao?.nome ?? null };
+        const nasUnidades = Math.round((nasUnidadesMap.get(r.operacao) ?? 0) * 100) / 100;
+        return { ...r, acao_cod: acao?.cod ?? null, acao_nome: acao?.nome ?? null, nas_unidades: nasUnidades };
       });
 
     opcoesFiltro = {

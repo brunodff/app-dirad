@@ -28,7 +28,6 @@ const TIPOS_OPCOES = [
   { value: 'DESCENTRALIZADO',   label: 'Descentralizado', cor: '#E0B341' },
   { value: 'DEVOLUCAO',         label: 'Devolução',       cor: '#E06A6A' },
   { value: 'RECEBIDO_UNIDADES', label: 'Rec. Unidades',   cor: '#25A3A3' },
-  { value: 'IGNORADO',          label: 'Entre unidades',  cor: '#8A94A6' },
 ];
 
 const semAcento = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();

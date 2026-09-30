@@ -9,6 +9,8 @@ export type ResumoRow = {
   descentralizado: number;
   empenhado: number;
   disponivel: number;
+  /** Crédito líquido nas unidades (fora do COMAE) — igual ao total "Unidades" da Execução. */
+  nas_unidades?: number;
   acao_cod?: string | null;
   acao_nome?: string | null;
 };
@@ -97,6 +99,36 @@ function ConfirmarDesativar({
   );
 }
 
+const MOV_DIRETA_TITLE =
+  'Crédito que entrou ou saiu das unidades sem passar pelo COMAE: remanejamentos e ' +
+  'recolhimentos feitos pelas unidades, entradas diretas do EMAER, correções de UGR.';
+
+/** Descentralizado ± movimentação direta das unidades = Nas unidades (aba Execução). */
+function Conciliacao({ descentralizado, nasUnidades }: { descentralizado: number; nasUnidades: number }) {
+  const movDireta = Math.round((nasUnidades - descentralizado) * 100) / 100;
+  const temMov = Math.abs(movDireta) >= 0.01;
+  return (
+    <div className="rounded-lg px-3 py-2 mb-4 text-[11px] tabular-nums space-y-1" style={{ background: '#0C1526', border: '1px solid #1E3050' }}>
+      <div className="flex justify-between gap-2">
+        <span className="text-slate-500">Descentralizado pelo COMAE</span>
+        <span className="text-slate-300">{brl(descentralizado)}</span>
+      </div>
+      {temMov && (
+        <div className="flex justify-between gap-2" title={MOV_DIRETA_TITLE}>
+          <span className="text-slate-500 underline decoration-dotted cursor-help">Mov. direta das unidades</span>
+          <span style={{ color: movDireta < 0 ? '#E06A6A' : '#3FB07A' }}>
+            {movDireta > 0 ? '+' : '−'}{brl(Math.abs(movDireta))}
+          </span>
+        </div>
+      )}
+      <div className="flex justify-between gap-2 pt-1" style={{ borderTop: '1px solid #1E3050' }}>
+        <span className="text-slate-400 font-semibold">Nas unidades</span>
+        <span className="text-white font-semibold">{brl(nasUnidades)}</span>
+      </div>
+    </div>
+  );
+}
+
 function OperacaoCard({
   row,
   podeEditar,
@@ -144,6 +176,10 @@ function OperacaoCard({
         <MetricItem label="Disponível"        value={row.disponivel}      color="#5FA8E0" />
       </div>
 
+      {row.nas_unidades !== undefined && (
+        <Conciliacao descentralizado={row.descentralizado} nasUnidades={row.nas_unidades} />
+      )}
+
       <div className="space-y-2">
         <ProgressBar label="Descentralização" pct={pctDesc} color="#E0B341" />
         {row.empenhado > 0 && (
@@ -175,8 +211,9 @@ export function OperacoesView({ resumo, filtrosAtivos, opcoes, podeEditar }: Pro
       descentralizado: acc.descentralizado + r.descentralizado,
       empenhado:       acc.empenhado       + r.empenhado,
       disponivel:      acc.disponivel      + r.disponivel,
+      nasUnidades:     acc.nasUnidades     + (r.nas_unidades ?? 0),
     }),
-    { recebido: 0, descentralizado: 0, empenhado: 0, disponivel: 0 },
+    { recebido: 0, descentralizado: 0, empenhado: 0, disponivel: 0, nasUnidades: 0 },
   );
 
   return (
@@ -186,13 +223,14 @@ export function OperacoesView({ resumo, filtrosAtivos, opcoes, podeEditar }: Pro
 
       {/* Totais */}
       <div
-        className="grid grid-cols-2 sm:grid-cols-4 gap-4 px-5 py-4 border-b"
+        className="grid grid-cols-2 sm:grid-cols-5 gap-4 px-5 py-4 border-b"
         style={{ borderColor: '#1E3050', background: '#080F1F' }}
       >
         <MetricItem label="Recebido Total"          value={totais.recebido}        color="#3FB07A" />
         <MetricItem label="Descentralizado Total"   value={totais.descentralizado} color="#E0B341" />
         <MetricItem label="Emp. COMAE Total"        value={totais.empenhado}       color="#C77DD6" />
         <MetricItem label="Disponível Total"        value={totais.disponivel}      color="#5FA8E0" />
+        <MetricItem label="Nas Unidades Total"      value={totais.nasUnidades}     color="#94A3B8" />
       </div>
 
       {/* Cards por operação */}

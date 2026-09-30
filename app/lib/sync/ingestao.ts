@@ -125,10 +125,19 @@ export async function ingerir(
 
     // ── Parse de crédito ─────────────────────────────────────────────────────
     const registrosBrutos: MovimentoCredito[] = [];
+    // Diagnóstico: linhas da planilha que não viram movimento (valor 0 ou UG "sem informação")
+    const descartadosCredito: Record<string, unknown>[] = [];
     for (const row of payload.credito) {
       try {
         const r = parseLinhaCreditoRecord(row);
         if (r) registrosBrutos.push(r);
+        else if (parseValor(row['VALOR']) !== 0) {
+          descartadosCredito.push({
+            nc: row['NC'], operacao: row['OPERACAO'], valor: row['VALOR'], nd: row['ND_COD'],
+            ug_exec: `${row['UG_EXEC_COD'] ?? ''} ${row['UG_EXEC_NOME'] ?? ''}`.trim(),
+            ug_resp: `${row['UG_RESP_COD'] ?? ''} ${row['UG_RESP_NOME'] ?? ''}`.trim(),
+          });
+        }
       } catch (e) {
         erros.push('Parse crédito: ' + String(e));
       }
@@ -271,6 +280,13 @@ export async function ingerir(
         registros_credito:   classificados.length,
         registros_empenhos:  empRows.length,
         erros:               erros.length ? erros : null,
+        detalhes: {
+          payload_credito:     payload.credito.length,
+          payload_empenhos:    payload.empenhos.length,
+          descartados_credito: descartadosCredito.length,
+          descartados_credito_amostra: descartadosCredito.slice(0, 200),
+          hashes_duplicados:   classificados.length - new Set(classificados.map(c => c.hashLinha)).size,
+        },
       })
       .eq('id', syncId);
 

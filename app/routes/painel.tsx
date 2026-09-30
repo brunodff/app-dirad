@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { usePresenca } from '~/lib/usePresenca';
 import { requireUser, getSession, commitSession } from '~/lib/session.server';
 import type { SessionData } from '~/lib/session.server';
-import { supabaseAdmin } from '~/lib/supabase.server';
+import { supabaseAdmin, fetchAll } from '~/lib/supabase.server';
 import { Sidebar } from '~/components/Sidebar';
 import { FeedView, type MovimentoRow } from '~/components/FeedView';
 import { OperacoesView, type ResumoRow } from '~/components/OperacoesView';
@@ -858,14 +858,24 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'reclassificar') {
     if (user.perfil !== 'DEV') return Response.json({ erro: 'Negado' }, { status: 403 });
 
-    // 1. Busca todos os movimentos do banco (campos brutos + hash)
-    const { data: movsDb, error: fetchErr } = await db
+    // 1. Busca os movimentos do último sync (campos brutos + hash).
+    //    Linhas de syncs anteriores foram purgadas (IGNORADO) pela ingestão e não devem voltar.
+    const { data: ultimoSync } = await db
+      .from('movimentos_credito')
+      .select('sync_id')
+      .order('sync_id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const ultimoSyncId = (ultimoSync as { sync_id?: number } | null)?.sync_id;
+    if (ultimoSyncId == null) return Response.json({ erro: 'Nenhum sync encontrado' }, { status: 400 });
+
+    const { data: movsArr, error: fetchErr } = await fetchAll<Record<string, unknown>>(() => db
       .from('movimentos_credito')
       .select('operacao,ug_exec_cod,ug_exec_nome,data,nc,descricao,ug_resp_cod,ug_resp_nome,nd_cod,nd_nome,favorecido_cod,favorecido_nome,origem_cod,origem_nome,valor,pedido,exercicio,hash_linha,sync_id')
-      .limit(100000);
+      .eq('sync_id', ultimoSyncId)
+      .order('id'));
 
     if (fetchErr) return Response.json({ erro: fetchErr.message }, { status: 500 });
-    const movsArr = (movsDb ?? []) as Record<string, unknown>[];
 
     // 2. Mapeia para MovimentoCredito
     const registros: MovimentoCredito[] = movsArr.map(r => ({
@@ -1028,30 +1038,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
       filtrosAtivos.tipos.length > 0 || !!filtrosAtivos.dataDe || !!filtrosAtivos.dataAte ||
       filtrosAtivos.ugExecs.length > 0 || filtrosAtivos.ugResps.length > 0 || filtrosAtivos.ugDestinos.length > 0;
 
-    let query = db
-      .from('movimentos_credito')
-      .select('id, operacao, tipo_calculado, nd_cod, nd_nome, nc, data, valor, descricao, ug_exec_cod, ug_exec_nome, ug_resp_nome, ug_destino_nome, subop, pedido, favorecido_nome, acao_cod, acao_nome')
-      .eq('exercicio', 2026)
-      .neq('tipo_calculado', 'IGNORADO')
-      .order('data', { ascending: false })
-      .limit(temFiltro ? 10000 : 400);
+    const buildFeed = () => {
+      let query = db
+        .from('movimentos_credito')
+        .select('id, operacao, tipo_calculado, nd_cod, nd_nome, nc, data, valor, descricao, ug_exec_cod, ug_exec_nome, ug_resp_nome, ug_destino_nome, subop, pedido, favorecido_nome, acao_cod, acao_nome')
+        .eq('exercicio', 2026)
+        .neq('tipo_calculado', 'IGNORADO')
+        .order('data', { ascending: false })
+        .order('id', { ascending: false });
 
-    if (filtrosAtivos.ops.length > 0)   query = query.in('operacao', filtrosAtivos.ops);
-    if (filtrosAtivos.dataDe)           query = query.gte('data', filtrosAtivos.dataDe);
-    if (filtrosAtivos.dataAte)          query = query.lte('data', filtrosAtivos.dataAte);
-    if (filtrosAtivos.nds.length > 0)   query = query.in('nd_cod', filtrosAtivos.nds);
-    if (filtrosAtivos.tipos.length > 0) query = query.in('tipo_calculado', filtrosAtivos.tipos);
-    if (filtrosAtivos.ugExecs    && filtrosAtivos.ugExecs.length    > 0) query = query.in('ug_exec_nome',    filtrosAtivos.ugExecs);
-    if (filtrosAtivos.ugDestinos && filtrosAtivos.ugDestinos.length > 0) query = query.in('ug_destino_nome', filtrosAtivos.ugDestinos);
-    if (filtrosAtivos.acoes      && filtrosAtivos.acoes.length      > 0) query = query.in('acao_cod',        filtrosAtivos.acoes);
+      if (filtrosAtivos.ops.length > 0)   query = query.in('operacao', filtrosAtivos.ops);
+      if (filtrosAtivos.dataDe)           query = query.gte('data', filtrosAtivos.dataDe);
+      if (filtrosAtivos.dataAte)          query = query.lte('data', filtrosAtivos.dataAte);
+      if (filtrosAtivos.nds.length > 0)   query = query.in('nd_cod', filtrosAtivos.nds);
+      if (filtrosAtivos.tipos.length > 0) query = query.in('tipo_calculado', filtrosAtivos.tipos);
+      if (filtrosAtivos.ugExecs    && filtrosAtivos.ugExecs.length    > 0) query = query.in('ug_exec_nome',    filtrosAtivos.ugExecs);
+      if (filtrosAtivos.ugDestinos && filtrosAtivos.ugDestinos.length > 0) query = query.in('ug_destino_nome', filtrosAtivos.ugDestinos);
+      if (filtrosAtivos.acoes      && filtrosAtivos.acoes.length      > 0) query = query.in('acao_cod',        filtrosAtivos.acoes);
+      return query;
+    };
 
     const [{ data: movsRaw }, { data: opsDisp }, { data: ndsDisp }, { data: ugExecsDisp }, { data: ugDestinosDisp }, { data: acoesDisp }, { data: resumoGlobal }] = await Promise.all([
-      query,
-      db.from('movimentos_credito').select('operacao').eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').order('operacao').limit(10000),
-      db.from('movimentos_credito').select('nd_cod, nd_nome').eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').order('nd_cod').limit(10000),
-      db.from('movimentos_credito').select('ug_exec_nome').eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').order('ug_exec_nome').limit(10000),
-      db.from('movimentos_credito').select('ug_destino_nome').eq('exercicio', 2026).eq('tipo_calculado', 'DESCENTRALIZADO').not('ug_destino_nome', 'is', null).order('ug_destino_nome').limit(10000),
-      db.from('movimentos_credito').select('acao_cod, acao_nome').eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').not('acao_cod', 'is', null).order('acao_cod').limit(1000),
+      temFiltro ? fetchAll(buildFeed) : buildFeed().limit(400),
+      fetchAll<{ operacao: string }>(() => db.from('movimentos_credito').select('operacao').eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').order('id')),
+      fetchAll<{ nd_cod: string; nd_nome: string }>(() => db.from('movimentos_credito').select('nd_cod, nd_nome').eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').order('id')),
+      fetchAll<{ ug_exec_nome: string }>(() => db.from('movimentos_credito').select('ug_exec_nome').eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').order('id')),
+      fetchAll<{ ug_destino_nome: string }>(() => db.from('movimentos_credito').select('ug_destino_nome').eq('exercicio', 2026).eq('tipo_calculado', 'DESCENTRALIZADO').not('ug_destino_nome', 'is', null).order('id')),
+      fetchAll<{ acao_cod: string; acao_nome: string | null }>(() => db.from('movimentos_credito').select('acao_cod, acao_nome').eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').not('acao_cod', 'is', null).order('id')),
       db.from('resumo_por_operacao').select('operacao, recebido, descentralizado'),
     ]);
 
@@ -1062,7 +1075,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // Opções para o FilterBar (excluindo desativadas)
     const todasOps = [...new Set((opsDisp ?? []).map((r: { operacao: string }) => r.operacao))]
-      .filter(op => !opsDesativadas.includes(op));
+      .filter(op => !opsDesativadas.includes(op)).sort();
     const ndsMap = new Map<string, string>();
     for (const r of (ndsDisp ?? []) as { nd_cod: string; nd_nome: string }[]) {
       if (!ndsMap.has(r.nd_cod)) ndsMap.set(r.nd_cod, r.nd_nome);
@@ -1076,10 +1089,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     opcoesFiltro = {
       operacoes:  todasOps,
-      nds:        [...ndsMap.entries()].map(([cod, nome]) => ({ cod, nome })),
+      nds:        [...ndsMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([cod, nome]) => ({ cod, nome })),
       ugExecs:    ugExecsOpcoes,
       ugDestinos: ugDestinosOpcoes,
-      acoes:      [...acoesOpcoesMap.entries()].map(([cod, nome]) => ({ cod, nome })),
+      acoes:      [...acoesOpcoesMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([cod, nome]) => ({ cod, nome })),
     };
 
     // Totais globais (todas as operações, sem limite) — usados no sumário quando não há filtro
@@ -1101,13 +1114,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .select('operacao, recebido, descentralizado, empenhado, disponivel')
       .order('operacao');
 
-    const { data: acoesOpRaw } = await db
+    const { data: acoesOpRaw } = await fetchAll<{ operacao: string; acao_cod: string | null; acao_nome: string | null }>(() => db
       .from('movimentos_credito')
       .select('operacao, acao_cod, acao_nome')
       .eq('exercicio', 2026)
       .neq('tipo_calculado', 'IGNORADO')
       .not('acao_cod', 'is', null)
-      .limit(500);
+      .order('id'));
 
     const acoesOpMap = new Map<string, { cod: string; nome: string }>();
     for (const r of (acoesOpRaw ?? [])) {
@@ -1136,8 +1149,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   /* ── EXECUÇÃO ORÇAMENTÁRIA ── */
   if (aba === 'execucao') {
     const [{ data: empRaw }, { data: syncRaw }] = await Promise.all([
-      db.from('empenhos')
-        .select('operacao, ug_exec_cod, ug_exec_nome, ug_resp_cod, ug_resp_nome, nd_cod, nd_nome, subop, disponivel, a_liquidar, em_liquidacao, liq_a_pagar, pago, total, acao_cod, acao_nome'),
+      fetchAll(() => db.from('empenhos')
+        .select('operacao, ug_exec_cod, ug_exec_nome, ug_resp_cod, ug_resp_nome, nd_cod, nd_nome, subop, disponivel, a_liquidar, em_liquidacao, liq_a_pagar, pago, total, acao_cod, acao_nome')
+        .order('id')),
       db.from('sync_log')
         .select('concluido_em')
         .in('status', ['SUCESSO', 'PARCIAL'])
@@ -1272,8 +1286,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           allMovs.push(...((byNc ?? []) as unknown as MovimentoRow[]));
         }
         if (ops.length > 0) {
-          const { data: byOp } = await db.from('movimentos_credito').select(COLS)
-            .eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').in('operacao', ops);
+          const { data: byOp } = await fetchAll(() => db.from('movimentos_credito').select(COLS)
+            .eq('exercicio', 2026).neq('tipo_calculado', 'IGNORADO').in('operacao', ops).order('id'));
           allMovs.push(...((byOp ?? []) as unknown as MovimentoRow[]));
         }
 
@@ -1285,7 +1299,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     // Opções de operações para o dropdown
-    const { data: opsRaw } = await db.from('movimentos_credito').select('operacao').eq('exercicio', 2026);
+    const { data: opsRaw } = await fetchAll<{ operacao: string }>(() => db.from('movimentos_credito').select('operacao').eq('exercicio', 2026).order('id'));
     const opsDisp = [...new Set((opsRaw ?? []).map(r => r.operacao as string))]
       .filter(op => !opsDesativadas.includes(op)).sort();
     opcoesFiltro = { operacoes: opsDisp, nds: [] };
@@ -1318,7 +1332,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const maxNumDesc = (maxNumDescRow as { num_desc?: number | null } | null)?.num_desc ?? null;
     proximoNumDesc = maxNumDesc !== null ? maxNumDesc + 1 : null;
 
-    const { data: opsRaw } = await db.from('movimentos_credito').select('operacao').eq('exercicio', 2026);
+    const { data: opsRaw } = await fetchAll<{ operacao: string }>(() => db.from('movimentos_credito').select('operacao').eq('exercicio', 2026).order('id'));
     const opsDisp = [...new Set((opsRaw ?? []).map(r => r.operacao as string))]
       .filter(op => !opsDesativadas.includes(op)).sort();
     opcoesFiltro = { operacoes: opsDisp, nds: [] };

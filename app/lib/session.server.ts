@@ -1,11 +1,11 @@
-import { createCookieSessionStorage, redirect } from 'react-router';
+import { createCookieSessionStorage, redirect, type Session } from 'react-router';
 import { optEnv } from '~/lib/env.server';
 
 // Lazy so env vars are read after Cloudflare context is set (not at module load time).
-let _storage: ReturnType<typeof createCookieSessionStorage> | null = null;
+let _storage: ReturnType<typeof createCookieSessionStorage<{ user: SessionData }>> | null = null;
 
 function storage() {
-  return (_storage ??= createCookieSessionStorage({
+  return (_storage ??= createCookieSessionStorage<{ user: SessionData }>({
     cookie: {
       name: '__comae_session',
       httpOnly: true,
@@ -27,7 +27,7 @@ export type SessionData = {
   nome: string;
 };
 
-type SessionStore = Awaited<ReturnType<ReturnType<typeof createCookieSessionStorage>['getSession']>>;
+type SessionStore = Session<{ user: SessionData }>;
 
 export async function getSession(request: Request): Promise<SessionStore> {
   return storage().getSession(request.headers.get('Cookie'));

@@ -14,6 +14,25 @@ export function supabaseAdmin() {
 }
 
 /**
+ * Busca todas as linhas de uma query paginando de 1000 em 1000
+ * (o PostgREST do Supabase corta qualquer resposta em 1000 linhas, mesmo com .limit maior).
+ * `build` deve criar a query do zero a cada chamada e ter ordenação estável.
+ */
+const PAGE = 1000;
+export async function fetchAll<T = Record<string, unknown>>(
+  build: () => { range(from: number, to: number): PromiseLike<{ data: unknown; error: { message: string } | null }> },
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build().range(from, from + PAGE - 1);
+    if (error) return { data: out, error };
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length < PAGE) return { data: out, error: null };
+  }
+}
+
+/**
  * Client anon — para leitura a partir de uma session JWT do usuário.
  * Passa o token para respeitar RLS.
  */

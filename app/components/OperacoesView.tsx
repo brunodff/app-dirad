@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useFetcher } from 'react-router';
 import { FilterBar, type FiltrosAtivos, type OpcoesFiltro } from './FilterBar';
 import { apelidoOperacao } from '~/lib/apelidoOperacao';
-import { Conciliacao } from './Conciliacao';
+import { Conciliacao, type VisaoUnidades } from './Conciliacao';
 
 export type ResumoRow = {
   operacao: string;
@@ -10,8 +10,8 @@ export type ResumoRow = {
   descentralizado: number;
   empenhado: number;
   disponivel: number;
-  /** Crédito líquido nas unidades (fora do COMAE) — igual ao total "Unidades" da Execução. */
-  nas_unidades?: number;
+  /** Crédito atual nas unidades (igual ao total "Unidades" da Execução) e movimentações das unidades. */
+  unidades?: VisaoUnidades;
   acao_cod?: string | null;
   acao_nome?: string | null;
 };
@@ -147,8 +147,8 @@ function OperacaoCard({
         <MetricItem label="Disponível"        value={row.disponivel}      color="#5FA8E0" />
       </div>
 
-      {row.nas_unidades !== undefined && (
-        <Conciliacao descentralizado={row.descentralizado} nasUnidades={row.nas_unidades} className="mb-4" />
+      {row.unidades && (
+        <Conciliacao recebido={row.descentralizado} atual={row.unidades.atual} itens={row.unidades.itens} recolhido className="mb-4" />
       )}
 
       <div className="space-y-2">
@@ -182,7 +182,7 @@ export function OperacoesView({ resumo, filtrosAtivos, opcoes, podeEditar }: Pro
       descentralizado: acc.descentralizado + r.descentralizado,
       empenhado:       acc.empenhado       + r.empenhado,
       disponivel:      acc.disponivel      + r.disponivel,
-      nasUnidades:     acc.nasUnidades     + (r.nas_unidades ?? 0),
+      nasUnidades:     acc.nasUnidades     + (r.unidades?.atual ?? 0),
     }),
     { recebido: 0, descentralizado: 0, empenhado: 0, disponivel: 0, nasUnidades: 0 },
   );
@@ -201,7 +201,7 @@ export function OperacoesView({ resumo, filtrosAtivos, opcoes, podeEditar }: Pro
         <MetricItem label="Descentralizado Total"   value={totais.descentralizado} color="#E0B341" />
         <MetricItem label="Emp. COMAE Total"        value={totais.empenhado}       color="#C77DD6" />
         <MetricItem label="Disponível Total"        value={totais.disponivel}      color="#5FA8E0" />
-        <MetricItem label="Nas Unidades Total"      value={totais.nasUnidades}     color="#94A3B8" />
+        <MetricItem label="Crédito Atual Unidades"  value={totais.nasUnidades}     color="#94A3B8" />
       </div>
 
       {/* Cards por operação */}

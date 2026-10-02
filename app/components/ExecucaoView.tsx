@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { FilterBar, type FiltrosAtivos, type OpcoesFiltro } from './FilterBar';
 import { apelidoOperacao } from '~/lib/apelidoOperacao';
-import { Conciliacao } from './Conciliacao';
+import { Conciliacao, type ConciliacaoUnidades } from './Conciliacao';
 
 export type EmpenhoDbRow = {
   operacao: string;
@@ -299,11 +299,14 @@ function OperacaoUnidades({ block }: { block: OpBlockUnidades }) {
 
 // ── Cards e barra de fases ────────────────────────────────────────────────────
 
-function SummaryCards({ total }: { total: Fases }) {
+/** `recebido`, quando informado (modo Unidades), substitui o Crédito Total pelo que o COMAE descentralizou. */
+function SummaryCards({ total, recebido }: { total: Fases; recebido?: number }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
       {[
-        { label: 'Crédito Total',  value: brl(total.total),        cor: '#EAF1FB' },
+        recebido !== undefined
+          ? { label: 'Recebido pelas Unidades', value: brl(recebido), cor: '#EAF1FB', sub: `Crédito atual ${brl(total.total)}` }
+          : { label: 'Crédito Total',  value: brl(total.total),        cor: '#EAF1FB' },
         { label: 'Disponível',     value: brl(total.disponivel),   cor: FASE.disponivel.cor },
         { label: 'A Liquidar',     value: brl(total.a_liquidar),   cor: FASE.a_liquidar.cor },
         { label: 'Liq. a Pagar',   value: brl(total.liq_a_pagar),  cor: FASE.liq_a_pagar.cor },
@@ -312,6 +315,7 @@ function SummaryCards({ total }: { total: Fases }) {
         <div key={c.label} className="rounded-xl p-3" style={{ background: '#101C33', border: '1px solid #1E3050' }}>
           <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">{c.label}</p>
           <p className="text-sm font-bold tabular-nums" style={{ color: c.cor }}>{c.value}</p>
+          {'sub' in c && c.sub && <p className="text-[10px] text-slate-500 tabular-nums mt-0.5">{c.sub}</p>}
         </div>
       ))}
     </div>
@@ -382,7 +386,7 @@ const TABLE_HEADERS = ['ND / Grupo', 'Disponível', 'A Liquidar', 'Em Liquidaç�
 type Props = {
   rows: EmpenhoDbRow[];
   /** Descentralizado × crédito nas unidades para o recorte atual (null se há filtros além de operação). */
-  conciliacao: { descentralizado: number; nasUnidades: number } | null;
+  conciliacao: ConciliacaoUnidades | null;
   filtrosAtivos: FiltrosAtivos;
   opcoes: OpcoesFiltro;
   ultimaSync: string | null;
@@ -398,6 +402,8 @@ export function ExecucaoView({ rows, conciliacao, filtrosAtivos, opcoes, ultimaS
   const rowsUnidades = rowsBase.filter(r => r.ug_resp_cod !== '120115');
   const rowsAtivos   = visao === 'comae' ? rowsComae : rowsUnidades;
   const totalGeral   = somarFases(rowsAtivos);
+  // Recebido/observações só valem no modo Unidades, sem o filtro de "com crédito disponível"
+  const conciliacaoAtiva = visao === 'unidades' && !soComCredito && conciliacao !== null;
 
   const blocosComae    = visao === 'comae'    ? agruparComae(rowsComae)       : [];
   const blocosUnidades = visao === 'unidades' ? agruparUnidades(rowsUnidades) : [];
@@ -455,14 +461,15 @@ export function ExecucaoView({ rows, conciliacao, filtrosAtivos, opcoes, ultimaS
       {/* Summary */}
       {rowsAtivos.length > 0 && (
         <div className="px-5 py-4 border-b space-y-3" style={{ borderColor: '#1E3050', background: '#080F1F' }}>
-          <SummaryCards total={totalGeral} />
+          <SummaryCards total={totalGeral} recebido={conciliacaoAtiva ? conciliacao.recebido : undefined} />
           <PhaseBar total={totalGeral} />
-          {visao === 'unidades' && !soComCredito && conciliacao && (
+          {conciliacaoAtiva && (
             <Conciliacao
-              descentralizado={conciliacao.descentralizado}
-              nasUnidades={conciliacao.nasUnidades}
+              recebido={conciliacao.recebido}
+              atual={conciliacao.atual}
+              itens={conciliacao.itens}
               execucaoTotal={totalGeral.total}
-              className="max-w-md"
+              className="max-w-2xl"
             />
           )}
         </div>

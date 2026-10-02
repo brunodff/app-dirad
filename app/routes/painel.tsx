@@ -24,6 +24,7 @@ import { CONFIG_PADRAO as SISCODEC_CONFIG_PADRAO } from '~/lib/siscodec-doc-conf
 import { gerarSiscodecPDF } from '~/lib/gerar-siscodec-pdf.server';
 import { classificar } from '~/lib/engine/classificar';
 import { UG_COMAE } from '~/lib/engine/regras';
+import type { ConciliacaoUnidades, MovUnidade, VisaoUnidades } from '~/components/Conciliacao';
 import type { MovimentoCredito, ConfigEngine } from '~/lib/engine/types';
 
 function buildConviteHtml({ email, actionLink, perfil, convidadoPor }: {
@@ -961,25 +962,72 @@ export async function action({ request }: ActionFunctionArgs) {
   return Response.json({ erro: 'Intent inválido' }, { status: 400 });
 }
 
+// UGs do circuito de câmbio: o CELOG devolve o crédito ("RMJ ATD PED …/DIRMAB") para o
+// fechamento de câmbio e ele reaparece numa comissão no exterior ("RMJ …").
+const UG_CELOG = '120071';
+const UGS_COMISSAO_EXTERIOR = new Set(['120090', '120091']); // Washington, Europa
+
 /**
- * Crédito líquido nas unidades por operação = soma de todas as pernas fora do COMAE
- * no último sync (inclui as IGNORADO). Bate com o total "Unidades" da aba Execução e
- * permite conciliar: Descentralizado ± movimentação direta das unidades = Nas unidades.
+ * Visão das unidades por operação, a partir do último sync (todas as pernas, inclusive IGNORADO).
+ *
+ * Para cada NC: movimentação = (soma das pernas fora do COMAE) − (o que o COMAE descentralizou
+ * ou recebeu de volta nessa NC). O que sobra é o que as unidades movimentaram por conta própria
+ * depois de receber (remanejamentos, câmbio, correções de UGR) ou recebidas direto, sem o COMAE.
+ *
+ * Recebido pelas unidades (= descentralizado) + Σ movimentações = crédito atual (bate com a Execução).
  */
-async function creditoNasUnidades(db: ReturnType<typeof supabaseAdmin>): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
+async function visaoUnidades(db: ReturnType<typeof supabaseAdmin>): Promise<Map<string, VisaoUnidades>> {
+  const map = new Map<string, VisaoUnidades>();
   const { data: ultimoSync } = await db.from('movimentos_credito').select('sync_id')
     .order('sync_id', { ascending: false }).limit(1).maybeSingle();
   const ultimoSyncId = (ultimoSync as { sync_id?: number } | null)?.sync_id;
   if (ultimoSyncId == null) return map;
-  const { data: pernas } = await fetchAll<{ operacao: string; valor: number }>(() => db
+
+  type Perna = {
+    operacao: string; nc: string; data: string; valor: number; ug_resp_cod: string;
+    ug_exec_cod: string; ug_exec_nome: string; tipo_calculado: string; descricao: string;
+  };
+  const { data: pernas } = await fetchAll<Perna>(() => db
     .from('movimentos_credito')
-    .select('operacao, valor')
+    .select('operacao, nc, data, valor, ug_resp_cod, ug_exec_cod, ug_exec_nome, tipo_calculado, descricao')
     .eq('sync_id', ultimoSyncId)
-    .neq('ug_resp_cod', UG_COMAE)
     .order('id'));
-  for (const r of pernas) map.set(r.operacao, (map.get(r.operacao) ?? 0) + Number(r.valor));
-  for (const [k, v] of map) map.set(k, Math.round(v * 100) / 100);
+
+  const porOpNc = new Map<string, Map<string, Perna[]>>();
+  for (const p of pernas) {
+    const ncs = porOpNc.get(p.operacao) ?? new Map<string, Perna[]>();
+    const ls = ncs.get(p.nc) ?? [];
+    ls.push(p);
+    ncs.set(p.nc, ls);
+    porOpNc.set(p.operacao, ncs);
+  }
+
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  for (const [operacao, ncs] of porOpNc) {
+    let atual = 0;
+    const itens: MovUnidade[] = [];
+    for (const [nc, ls] of ncs) {
+      const unid  = ls.filter(p => p.ug_resp_cod !== UG_COMAE);
+      const somaUnid = unid.reduce((s, p) => s + Number(p.valor), 0);
+      const viaComae = -ls
+        .filter(p => p.ug_resp_cod === UG_COMAE && (p.tipo_calculado === 'DESCENTRALIZADO' || p.tipo_calculado === 'DEVOLUCAO'))
+        .reduce((s, p) => s + Number(p.valor), 0);
+      atual += somaUnid;
+      const valor = r2(somaUnid - viaComae);
+      if (Math.abs(valor) < 0.01 || unid.length === 0) continue;
+
+      const ref = unid.reduce((a, p) => (Math.abs(p.valor) > Math.abs(a.valor) ? p : a));
+      const cambio =
+        (valor < 0 && unid.some(p => p.ug_exec_cod === UG_CELOG && /RMJ/.test(p.descricao) && /DIRMAB/.test(p.descricao))) ||
+        (valor > 0 && unid.some(p => UGS_COMISSAO_EXTERIOR.has(p.ug_exec_cod) && /RMJ/.test(p.descricao)));
+      itens.push({
+        nc, valor, data: ref.data, ug: ref.ug_exec_nome, descricao: ref.descricao,
+        tipo: cambio ? 'cambio' : valor > 0 ? 'entrada' : 'saida',
+      });
+    }
+    itens.sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+    map.set(operacao, { atual: r2(atual), itens });
+  }
   return map;
 }
 
@@ -1042,7 +1090,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let atividadeHoje: NavegacaoRow[]     = [];
   let desativadas:   ConfigOperacao[]   = [];
   let empenhoRows:            EmpenhoDbRow[]         = [];
-  let conciliacaoExec: { descentralizado: number; nasUnidades: number } | null = null;
+  let conciliacaoExec: ConciliacaoUnidades | null = null;
   let graficos: GraficoOpRow[] = [];
   let quadros:                Quadro[]               = [];
   let quadroAtivo:            Quadro | null          = null;
@@ -1148,7 +1196,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .not('acao_cod', 'is', null)
       .order('id'));
 
-    const nasUnidadesMap = await creditoNasUnidades(db);
+    const visaoMap = await visaoUnidades(db);
 
     const acoesOpMap = new Map<string, { cod: string; nome: string }>();
     for (const r of (acoesOpRaw ?? [])) {
@@ -1163,7 +1211,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .filter(r => filtrosAtivos.ops.length === 0 || filtrosAtivos.ops.includes(r.operacao))
       .map(r => {
         const acao = acoesOpMap.get(r.operacao);
-        return { ...r, acao_cod: acao?.cod ?? null, acao_nome: acao?.nome ?? null, nas_unidades: nasUnidadesMap.get(r.operacao) ?? 0 };
+        return { ...r, acao_cod: acao?.cod ?? null, acao_nome: acao?.nome ?? null, unidades: visaoMap.get(r.operacao) ?? { atual: 0, itens: [] } };
       });
 
     opcoesFiltro = {
@@ -1229,9 +1277,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const soFiltroOps = filtrosAtivos.nds.length === 0 && (filtrosAtivos.ugExecs ?? []).length === 0
       && (filtrosAtivos.ugResps ?? []).length === 0 && (filtrosAtivos.acoes ?? []).length === 0;
     if (soFiltroOps) {
-      const [{ data: resumoDesc }, nasUnidadesMap] = await Promise.all([
+      const [{ data: resumoDesc }, visaoMap] = await Promise.all([
         db.from('resumo_por_operacao').select('operacao, descentralizado'),
-        creditoNasUnidades(db),
+        visaoUnidades(db),
       ]);
       const incluiOp = (op: string) => !opsDesativadas.includes(op)
         && (filtrosAtivos.ops.length === 0 || filtrosAtivos.ops.includes(op));
@@ -1239,9 +1287,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       for (const r of (resumoDesc ?? []) as { operacao: string; descentralizado: number }[]) {
         if (incluiOp(r.operacao)) descentralizado += Number(r.descentralizado ?? 0);
       }
-      let nasUnidades = 0;
-      for (const [op, v] of nasUnidadesMap) if (incluiOp(op)) nasUnidades += v;
-      conciliacaoExec = { descentralizado, nasUnidades };
+      let atual = 0;
+      const itens: MovUnidade[] = [];
+      for (const [op, v] of visaoMap) {
+        if (!incluiOp(op)) continue;
+        atual += v.atual;
+        itens.push(...v.itens);
+      }
+      itens.sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+      conciliacaoExec = { recebido: descentralizado, atual, itens };
     }
 
     ultimaSync = String((syncRaw as { concluido_em?: unknown } | null)?.concluido_em ?? '') || null;

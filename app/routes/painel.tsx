@@ -1292,6 +1292,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .sort((a, b) => b.recebido - a.recebido || a.operacao.localeCompare(b.operacao));
 
     opcoesFiltro = { operacoes: todasOps.sort(), nds: [] };
+
+    const { data: syncRaw } = await db.from('sync_log').select('concluido_em')
+      .in('status', ['SUCESSO', 'PARCIAL']).order('concluido_em', { ascending: false }).limit(1).maybeSingle();
+    ultimaSync = String((syncRaw as { concluido_em?: unknown } | null)?.concluido_em ?? '') || null;
   }
 
   /* ── DESATIVADOS ── */
@@ -1561,7 +1565,7 @@ export default function Painel() {
       case 'power-bi':
         return <PowerBIView />;
       case 'graficos':
-        return <GraficosView graficos={graficos} filtrosAtivos={filtrosAtivos} opcoes={opcoesFiltro} />;
+        return <GraficosView graficos={graficos} filtrosAtivos={filtrosAtivos} opcoes={opcoesFiltro} ultimaSync={ultimaSync} />;
       case 'ferramentas':
         return <FerramentasView />;
       case 'dev':

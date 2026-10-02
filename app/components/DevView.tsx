@@ -69,6 +69,7 @@ const ABA_LABELS: Record<string, string> = {
   desativados:   'Desativados',
   configuracoes: 'Configurações',
   'power-bi':    'Power BI',
+  'graficos':    'Gráficos',
   dev:           'Analytics',
 };
 

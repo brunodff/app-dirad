@@ -207,7 +207,7 @@ export function OperacoesView({ resumo, filtrosAtivos, opcoes, podeEditar }: Pro
       {/* Cards por operação */}
       <div className="p-5">
         <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-4">
-          {resumo.length} operação{resumo.length !== 1 ? 'ões' : ''}
+          {resumo.length} {resumo.length === 1 ? 'operação' : 'operações'}
           {filtrosAtivos.ops.length > 0 && ' (filtradas)'}
         </p>
         {resumo.length === 0 ? (

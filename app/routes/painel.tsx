@@ -10,6 +10,7 @@ import { Sidebar } from '~/components/Sidebar';
 import { FeedView, type MovimentoRow } from '~/components/FeedView';
 import { OperacoesView, type ResumoRow } from '~/components/OperacoesView';
 import { PowerBIView } from '~/components/PowerBIView';
+import { GraficosView, type GraficoOpRow } from '~/components/GraficosView';
 import { DevView, type UsuarioAnalytics, type SyncLogRow, type NavegacaoRow } from '~/components/DevView';
 import { DesativadosView, type ConfigOperacao, type MovimentoDescartado } from '~/components/DesativadosView';
 import { ExecucaoView, type EmpenhoDbRow } from '~/components/ExecucaoView';
@@ -75,7 +76,7 @@ function buildConviteHtml({ email, actionLink, perfil, convidadoPor }: {
 
 const ABAS_VALIDAS = [
   'feed', 'operacoes', 'execucao', 'unidades', 'naturezas', 'conferencia',
-  'desativados', 'configuracoes', 'power-bi', 'dev', 'rascunho', 'siscodec', 'ferramentas',
+  'desativados', 'configuracoes', 'power-bi', 'graficos', 'dev', 'rascunho', 'siscodec', 'ferramentas',
 ] as const;
 type AbaId = (typeof ABAS_VALIDAS)[number];
 
@@ -992,7 +993,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const db = supabaseAdmin();
 
   // Só busca operações desativadas nas abas que realmente precisam
-  const abasComDesativadas = new Set(['feed', 'operacoes', 'execucao', 'rascunho', 'siscodec', 'desativados']);
+  const abasComDesativadas = new Set(['feed', 'operacoes', 'execucao', 'rascunho', 'siscodec', 'desativados', 'graficos']);
   const abasComDescartados = new Set(['feed', 'desativados']);
 
   // Atualiza último acesso + registra navegação em paralelo com as queries iniciais (awaited para garantir que as queries seguintes vejam dados frescos)
@@ -1042,6 +1043,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let desativadas:   ConfigOperacao[]   = [];
   let empenhoRows:            EmpenhoDbRow[]         = [];
   let conciliacaoExec: { descentralizado: number; nasUnidades: number } | null = null;
+  let graficos: GraficoOpRow[] = [];
   let quadros:                Quadro[]               = [];
   let quadroAtivo:            Quadro | null          = null;
   let rascunhoItens:          RascunhoItem[]         = [];
@@ -1245,6 +1247,53 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ultimaSync = String((syncRaw as { concluido_em?: unknown } | null)?.concluido_em ?? '') || null;
   }
 
+  /* ── GRÁFICOS ── */
+  if (aba === 'graficos') {
+    const [{ data: resumoRaw }, { data: empRaw }] = await Promise.all([
+      db.from('resumo_por_operacao').select('operacao, recebido, descentralizado, empenhado, disponivel'),
+      fetchAll<{ operacao: string; ug_resp_cod: string; disponivel: number; a_liquidar: number; em_liquidacao: number; liq_a_pagar: number; pago: number }>(() => db
+        .from('empenhos')
+        .select('operacao, ug_resp_cod, disponivel, a_liquidar, em_liquidacao, liq_a_pagar, pago')
+        .order('id')),
+    ]);
+
+    // Execução soma COMAE + unidades; "Disponível OM" é só o das unidades
+    const vazio = () => ({ disponivelOm: 0, aLiquidar: 0, emLiquidacao: 0, aPagar: 0, pago: 0 });
+    const execMap = new Map<string, ReturnType<typeof vazio>>();
+    for (const e of empRaw) {
+      const acc = execMap.get(e.operacao) ?? vazio();
+      if (e.ug_resp_cod !== UG_COMAE) acc.disponivelOm += Number(e.disponivel ?? 0);
+      acc.aLiquidar    += Number(e.a_liquidar ?? 0);
+      acc.emLiquidacao += Number(e.em_liquidacao ?? 0);
+      acc.aPagar       += Number(e.liq_a_pagar ?? 0);
+      acc.pago         += Number(e.pago ?? 0);
+      execMap.set(e.operacao, acc);
+    }
+
+    const resumoMap = new Map(((resumoRaw ?? []) as ResumoRow[]).map(r => [r.operacao, r]));
+    const todasOps = [...new Set([...resumoMap.keys(), ...execMap.keys()])]
+      .filter(op => !opsDesativadas.includes(op));
+
+    graficos = todasOps
+      .filter(op => filtrosAtivos.ops.length === 0 || filtrosAtivos.ops.includes(op))
+      .map(op => {
+        const r = resumoMap.get(op);
+        const x = execMap.get(op) ?? vazio();
+        return {
+          operacao:        op,
+          recebido:        Number(r?.recebido ?? 0),
+          descentralizado: Number(r?.descentralizado ?? 0),
+          empenhadoComae:  Number(r?.empenhado ?? 0),
+          disponivelComae: Number(r?.disponivel ?? 0),
+          ...x,
+        };
+      })
+      .filter(g => Math.abs(g.recebido) >= 0.01 || Math.abs(g.disponivelOm + g.aLiquidar + g.emLiquidacao + g.aPagar + g.pago) >= 0.01)
+      .sort((a, b) => b.recebido - a.recebido || a.operacao.localeCompare(b.operacao));
+
+    opcoesFiltro = { operacoes: todasOps.sort(), nds: [] };
+  }
+
   /* ── DESATIVADOS ── */
   if (aba === 'desativados') {
     const [{ data: confData }, { data: descData }, { data: u }] = await Promise.all([
@@ -1425,7 +1474,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     movimentos, totaisGlobais, resumo, desativadas,
     usuarios, syncLogs, navegacoes, atividadeHoje,
     podeEditar: PODE_EDITAR.includes(user.perfil),
-    empenhoRows, conciliacaoExec, ultimaSync, quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
+    empenhoRows, conciliacaoExec, graficos, ultimaSync, quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
     movimentosDescartados, siscodecPedidos, apiToken, usuariosGerencial, solicitacoes, proximoNumDesc, modelos,
     supabaseUrl: optEnv('SUPABASE_URL'),
     anonKey:     optEnv('SUPABASE_ANON_KEY'),
@@ -1459,7 +1508,7 @@ export default function Painel() {
     user, aba, filtrosAtivos, opcoesFiltro,
     movimentos, totaisGlobais, resumo, desativadas,
     usuarios, syncLogs, navegacoes, atividadeHoje,
-    podeEditar, empenhoRows, conciliacaoExec, ultimaSync,
+    podeEditar, empenhoRows, conciliacaoExec, graficos, ultimaSync,
     quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
     movimentosDescartados, siscodecPedidos, apiToken, usuariosGerencial, solicitacoes, proximoNumDesc, modelos,
     supabaseUrl, anonKey,
@@ -1511,6 +1560,8 @@ export default function Painel() {
         return <ConfiguracoesView usuarios={usuariosGerencial} userAtual={user} />;
       case 'power-bi':
         return <PowerBIView />;
+      case 'graficos':
+        return <GraficosView graficos={graficos} filtrosAtivos={filtrosAtivos} opcoes={opcoesFiltro} />;
       case 'ferramentas':
         return <FerramentasView />;
       case 'dev':

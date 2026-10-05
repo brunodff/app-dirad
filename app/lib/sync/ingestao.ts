@@ -283,6 +283,8 @@ export async function ingerir(
         detalhes: {
           payload_credito:     payload.credito.length,
           payload_empenhos:    payload.empenhos.length,
+          colunas_credito:     Object.keys(payload.credito[0] ?? {}),
+          colunas_empenhos:    Object.keys(payload.empenhos[0] ?? {}),
           descartados_credito: descartadosCredito.length,
           descartados_credito_amostra: descartadosCredito.slice(0, 200),
           hashes_duplicados:   classificados.length - new Set(classificados.map(c => c.hashLinha)).size,

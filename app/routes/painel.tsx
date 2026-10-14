@@ -24,7 +24,7 @@ import { CONFIG_PADRAO as SISCODEC_CONFIG_PADRAO } from '~/lib/siscodec-doc-conf
 import { gerarSiscodecPDF } from '~/lib/gerar-siscodec-pdf.server';
 import { classificar } from '~/lib/engine/classificar';
 import { UG_COMAE } from '~/lib/engine/regras';
-import type { ConciliacaoUnidades, MovUnidade, VisaoUnidades } from '~/components/Conciliacao';
+import { creditoDireto, type ConciliacaoUnidades, type MovUnidade, type VisaoUnidades } from '~/components/Conciliacao';
 import type { MovimentoCredito, ConfigEngine } from '~/lib/engine/types';
 
 function buildConviteHtml({ email, actionLink, perfil, convidadoPor }: {
@@ -962,6 +962,18 @@ export async function action({ request }: ActionFunctionArgs) {
   return Response.json({ erro: 'Intent inválido' }, { status: 400 });
 }
 
+const UG_EME = '160087'; // Estado-Maior do Exército (destaques à FAB)
+
+/** Quem pediu/mandou o crédito: órgão do "PEDIDO NR …/ÓRGÃO/AAAA" ou, sem pedido, a UG de origem. */
+function origemCredito(p: { descricao: string; origem_cod: string; origem_nome: string }): string {
+  const org = p.descricao.match(/PEDIDO NR\s*\d+\s*\/\s*([A-Z0-9-]+)\s*\//)?.[1];
+  if (org) return org;
+  if (p.origem_cod === UG_EME) return 'Exército (destaque)';
+  if (p.origem_cod === '120002') return 'DIRAD';
+  if (p.origem_cod === '121002') return 'DIRAD – Fundo Aeronáutico';
+  return (p.origem_nome || p.origem_cod || 'origem não identificada').trim();
+}
+
 // UGs do circuito de câmbio: o CELOG devolve o crédito ("RMJ ATD PED …/DIRMAB") para o
 // fechamento de câmbio e ele reaparece numa comissão no exterior ("RMJ …").
 const UG_CELOG = '120071';
@@ -986,10 +998,11 @@ async function visaoUnidades(db: ReturnType<typeof supabaseAdmin>): Promise<Map<
   type Perna = {
     operacao: string; nc: string; data: string; valor: number; ug_resp_cod: string;
     ug_exec_cod: string; ug_exec_nome: string; tipo_calculado: string; descricao: string;
+    origem_cod: string; origem_nome: string;
   };
   const { data: pernas } = await fetchAll<Perna>(() => db
     .from('movimentos_credito')
-    .select('operacao, nc, data, valor, ug_resp_cod, ug_exec_cod, ug_exec_nome, tipo_calculado, descricao')
+    .select('operacao, nc, data, valor, ug_resp_cod, ug_exec_cod, ug_exec_nome, tipo_calculado, descricao, origem_cod, origem_nome')
     .eq('sync_id', ultimoSyncId)
     .order('id'));
 
@@ -1023,6 +1036,7 @@ async function visaoUnidades(db: ReturnType<typeof supabaseAdmin>): Promise<Map<
       itens.push({
         nc, valor, data: ref.data, ug: ref.ug_exec_nome, descricao: ref.descricao,
         tipo: cambio ? 'cambio' : valor > 0 ? 'entrada' : 'saida',
+        origem: origemCredito(ref),
       });
     }
     itens.sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
@@ -1303,12 +1317,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   /* ── GRÁFICOS ── */
   if (aba === 'graficos') {
-    const [{ data: resumoRaw }, { data: empRaw }] = await Promise.all([
+    const [{ data: resumoRaw }, { data: empRaw }, visaoMap] = await Promise.all([
       db.from('resumo_por_operacao').select('operacao, recebido, descentralizado, empenhado, disponivel'),
       fetchAll<{ operacao: string; ug_resp_cod: string; disponivel: number; a_liquidar: number; em_liquidacao: number; liq_a_pagar: number; pago: number }>(() => db
         .from('empenhos')
         .select('operacao, ug_resp_cod, disponivel, a_liquidar, em_liquidacao, liq_a_pagar, pago')
         .order('id')),
+      visaoUnidades(db),
     ]);
 
     // Execução soma COMAE + unidades; "Disponível OM" é só o das unidades
@@ -1333,6 +1348,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .map(op => {
         const r = resumoMap.get(op);
         const x = execMap.get(op) ?? vazio();
+        const visao = visaoMap.get(op);
         return {
           operacao:        op,
           recebido:        Number(r?.recebido ?? 0),
@@ -1340,10 +1356,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
           empenhadoComae:  Number(r?.empenhado ?? 0),
           disponivelComae: Number(r?.disponivel ?? 0),
           ...x,
+          direto:          creditoDireto(visao?.itens ?? []),
+          semCredito:      !visao,
         };
       })
       .filter(g => Math.abs(g.recebido) >= 0.01 || Math.abs(g.disponivelOm + g.aLiquidar + g.emLiquidacao + g.aPagar + g.pago) >= 0.01)
-      .sort((a, b) => b.recebido - a.recebido || a.operacao.localeCompare(b.operacao));
+      .sort((a, b) => (b.recebido || b.direto.total) - (a.recebido || a.direto.total) || a.operacao.localeCompare(b.operacao));
 
     opcoesFiltro = { operacoes: todasOps.sort(), nds: [] };
 

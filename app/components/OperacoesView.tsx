@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useFetcher } from 'react-router';
 import { FilterBar, type FiltrosAtivos, type OpcoesFiltro } from './FilterBar';
 import { apelidoOperacao } from '~/lib/apelidoOperacao';
-import { Conciliacao, type VisaoUnidades } from './Conciliacao';
+import { Conciliacao, NotaCreditoDireto, creditoDireto, type VisaoUnidades } from './Conciliacao';
 
 export type ResumoRow = {
   operacao: string;
@@ -139,6 +139,10 @@ function OperacaoCard({
           </button>
         )}
       </div>
+
+      {row.unidades && (
+        <NotaCreditoDireto recebidoComae={row.recebido} direto={creditoDireto(row.unidades.itens)} className="mb-4" />
+      )}
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-5">
         <MetricItem label="Recebido"          value={row.recebido}        color="#3FB07A" />

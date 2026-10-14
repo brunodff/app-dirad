@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FilterBar, type FiltrosAtivos, type OpcoesFiltro } from './FilterBar';
 import { apelidoOperacao } from '~/lib/apelidoOperacao';
+import { NotaCreditoDireto, diretoRelevante, type CreditoDireto } from './Conciliacao';
 
 export type GraficoOpRow = {
   operacao: string;
@@ -13,7 +14,25 @@ export type GraficoOpRow = {
   emLiquidacao: number;
   aPagar: number;
   pago: number;
+  /** Crédito que chegou direto às OM, sem passar pelo COMAE. */
+  direto: CreditoDireto;
+  /** Há execução, mas nenhuma movimentação de crédito da operação na planilha. */
+  semCredito: boolean;
 };
+
+/**
+ * Bases dos percentuais: o grupo "Crédito COMAE" é medido sobre o recebido pelo COMAE; a execução,
+ * sobre tudo o que entrou na operação (COMAE + crédito que foi direto às OM, quando houver).
+ */
+const semRecebidoComae = (r: GraficoOpRow) => Math.abs(r.recebido) < 0.01;
+const temDireto = (r: GraficoOpRow) => diretoRelevante(r.recebido, r.direto);
+const baseExec = (r: GraficoOpRow) => r.recebido + (temDireto(r) ? r.direto.total : 0);
+const baseGrupo = (r: GraficoOpRow, grupo: Barra['grupo']) => (grupo === 'credito' ? r.recebido : baseExec(r));
+const rotuloBase = (r: GraficoOpRow, grupo: Barra['grupo']) =>
+  grupo === 'credito' ? 'do recebido pelo COMAE'
+  : !temDireto(r) ? 'do recebido'
+  : semRecebidoComae(r) ? 'do recebido direto pelas OM'
+  : 'do total recebido (COMAE + direto às OM)';
 
 // ── Formatação ────────────────────────────────────────────────────────────────
 
@@ -33,8 +52,8 @@ function compacto(v: number): string {
 function eixo(v: number): string {
   if (v === 0) return '0';
   if (v >= 1e6) return `${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
-  if (v >= 1e3) return `${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`;
-  return v.toLocaleString('pt-BR');
+  if (v >= 1e3) return `${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+  return v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 }
 
 function pct(v: number, base: number): string {
@@ -94,9 +113,10 @@ function montarBarras(r: GraficoOpRow): Barra[] {
 
 const totalBarra = (b: Barra) => b.segmentos.reduce((s, x) => s + x.valor, 0);
 
-/** Itens da legenda com valores completos (oculta Emp. COMAE zerado). */
-function itensLegenda(row: GraficoOpRow): Segmento[] {
-  return montarBarras(row).flatMap(b => b.segmentos)
+/** Itens da legenda com valores completos e a base do % de cada um (oculta Emp. COMAE zerado). */
+function itensLegenda(row: GraficoOpRow): Array<Segmento & { base: number }> {
+  return montarBarras(row)
+    .flatMap(b => b.segmentos.map(sg => ({ ...sg, base: baseGrupo(row, b.grupo) })))
     .filter(it => it.label !== 'Empenhado COMAE' || Math.abs(it.valor) >= 0.01);
 }
 
@@ -159,6 +179,7 @@ function GraficoBarras({ row, tam = TAM_CARD }: { row: GraficoOpRow; tam?: Taman
             <div className={`absolute inset-0 flex items-end ${tam.gap} px-1`}>
               {barras.map((b, i) => {
                 const total = totalBarra(b);
+                const base  = baseGrupo(row, b.grupo);
                 return (
                   <div key={b.id} className="relative flex-1 flex items-end justify-center h-full group">
                     {i === iDivisor && (
@@ -171,7 +192,7 @@ function GraficoBarras({ row, tam = TAM_CARD }: { row: GraficoOpRow; tam?: Taman
                         {compacto(total)}
                       </span>
                       <span className={`${tam.pctTxt} text-slate-400 tabular-nums whitespace-nowrap leading-tight mb-1`}>
-                        {pct(total, row.recebido)}
+                        {pct(total, base)}
                       </span>
 
                       {/* Barra (empilhada de baixo para cima) */}
@@ -206,7 +227,7 @@ function GraficoBarras({ row, tam = TAM_CARD }: { row: GraficoOpRow; tam?: Taman
                         </p>
                       ))}
                       <p className="tabular-nums text-white font-semibold">
-                        {brl(total)} <span className="text-slate-400 font-normal">· {pct(total, row.recebido)} do recebido</span>
+                        {brl(total)} <span className="text-slate-400 font-normal">· {pct(total, base)} {rotuloBase(row, b.grupo)}</span>
                       </p>
                     </div>
                   </div>
@@ -253,7 +274,27 @@ function IconeTelaCheia({ size = 13 }: { size?: number }) {
   );
 }
 
+/** "Recebido" do COMAE e/ou o crédito que foi direto às OM. */
+function DestaqueRecebido({ row, grande = false }: { row: GraficoOpRow; grande?: boolean }) {
+  if (semRecebidoComae(row) && temDireto(row)) {
+    return <Destaque grande={grande} label="Recebido direto (OM)" valor={brl(row.direto.total)} cor={COR.dispOm} />;
+  }
+  return (
+    <>
+      <Destaque grande={grande} label="Recebido" valor={brl(row.recebido)} cor={COR.recebido} />
+      {temDireto(row) && <Destaque grande={grande} label="Direto às OM" valor={brl(row.direto.total)} cor={COR.dispOm} />}
+    </>
+  );
+}
+
+function textoBase(row: GraficoOpRow): string {
+  if (!temDireto(row)) return 'Percentuais sobre o recebido pelo COMAE';
+  if (semRecebidoComae(row)) return 'Percentuais sobre o recebido direto pelas OM';
+  return 'Crédito COMAE em % do recebido pelo COMAE · execução em % do total recebido (COMAE + direto às OM)';
+}
+
 function GraficoCard({ row, onApresentar }: { row: GraficoOpRow; onApresentar: () => void }) {
+  const base = baseExec(row);
   return (
     <div className="rounded-2xl p-5" style={{ background: '#101C33', border: '1px solid #1E3050' }}>
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-5">
@@ -263,9 +304,9 @@ function GraficoCard({ row, onApresentar }: { row: GraficoOpRow; onApresentar: (
             {apelidoOperacao(row.operacao)}
           </h2>
         </div>
-        <div className="flex gap-2 flex-shrink-0 items-stretch">
-          <Destaque label="Recebido" valor={brl(row.recebido)} cor={COR.recebido} />
-          <Destaque label="Pago" valor={pct(row.pago, row.recebido)} cor={COR.pago} />
+        <div className="flex flex-wrap gap-2 flex-shrink-0 items-stretch">
+          <DestaqueRecebido row={row} />
+          <Destaque label="Pago" valor={pct(row.pago, base)} cor={COR.pago} />
           <button
             type="button"
             onClick={onApresentar}
@@ -278,6 +319,8 @@ function GraficoCard({ row, onApresentar }: { row: GraficoOpRow; onApresentar: (
         </div>
       </div>
 
+      <NotaCreditoDireto recebidoComae={row.recebido} direto={row.direto} semCredito={row.semCredito} className="mb-4" />
+
       <GraficoBarras row={row} />
 
       {/* Valores completos */}
@@ -288,7 +331,7 @@ function GraficoCard({ row, onApresentar }: { row: GraficoOpRow; onApresentar: (
             <div className="min-w-0">
               <p className="text-[10px] text-slate-500 leading-tight">{it.label}</p>
               <p className="text-xs text-slate-200 font-semibold tabular-nums leading-tight">
-                {brl(it.valor)} <span className="text-[10px] text-slate-500 font-normal">{pct(it.valor, row.recebido)}</span>
+                {brl(it.valor)} <span className="text-[10px] text-slate-500 font-normal">{pct(it.valor, it.base)}</span>
               </p>
             </div>
           </div>
@@ -377,6 +420,7 @@ function Apresentacao({ rows, inicio, ultimaSync, onFechar }: {
   if (!row) return null;
   const sync = formatarSync(ultimaSync);
   const saiuComae = row.descentralizado + row.empenhadoComae;
+  const base = baseExec(row);
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col px-10 py-8 overflow-y-auto" style={{ background: '#0C1526' }}>
@@ -387,11 +431,15 @@ function Apresentacao({ rows, inicio, ultimaSync, onFechar }: {
           <h1 className="text-4xl font-bold text-white leading-tight">{apelidoOperacao(row.operacao)}</h1>
         </div>
         <div className="flex gap-3 flex-shrink-0">
-          <Destaque grande label="Recebido" valor={brl(row.recebido)} cor={COR.recebido} />
-          <Destaque grande label="Descentralizado" valor={pct(saiuComae, row.recebido)} cor={COR.descentralizado} />
-          <Destaque grande label="Pago" valor={pct(row.pago, row.recebido)} cor={COR.pago} />
+          <DestaqueRecebido grande row={row} />
+          {!semRecebidoComae(row) && (
+            <Destaque grande label="Descentralizado" valor={pct(saiuComae, row.recebido)} cor={COR.descentralizado} />
+          )}
+          <Destaque grande label="Pago" valor={pct(row.pago, base)} cor={COR.pago} />
         </div>
       </div>
+
+      <NotaCreditoDireto grande recebidoComae={row.recebido} direto={row.direto} semCredito={row.semCredito} className="mb-4" />
 
       {/* Gráfico */}
       <div className="flex-1 flex flex-col justify-center rounded-2xl px-6 pt-6 pb-4" style={{ background: '#101C33', border: '1px solid #1E3050' }}>
@@ -406,7 +454,7 @@ function Apresentacao({ rows, inicio, ultimaSync, onFechar }: {
             <div className="min-w-0">
               <p className="text-xs text-slate-500 leading-tight">{it.label}</p>
               <p className="text-lg text-slate-100 font-semibold tabular-nums leading-tight whitespace-nowrap">
-                {brl(it.valor)} <span className="text-sm text-slate-500 font-normal">{pct(it.valor, row.recebido)}</span>
+                {brl(it.valor)} <span className="text-sm text-slate-500 font-normal">{pct(it.valor, it.base)}</span>
               </p>
             </div>
           </div>
@@ -416,7 +464,8 @@ function Apresentacao({ rows, inicio, ultimaSync, onFechar }: {
       {/* Rodapé + controles */}
       <div className="flex items-center justify-between gap-4 mt-6 pt-4" style={{ borderTop: '1px solid #1E3050' }}>
         <p className="text-xs text-slate-500">
-          {sync && <>Dados sincronizados em {sync} · </>}Percentuais sobre o recebido pelo COMAE
+          {sync && <>Dados sincronizados em {sync} · </>}
+          {textoBase(row)}
         </p>
         <div className="flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">
           {rows.length > 1 && (
@@ -457,7 +506,7 @@ export function GraficosView({ graficos, filtrosAtivos, opcoes, ultimaSync }: Pr
         <div>
           <h2 className="text-sm font-bold text-white mb-0.5">Gráficos</h2>
           <p className="text-[10px] text-slate-500">
-            Crédito e execução por operação · percentuais sobre o recebido pelo COMAE
+            Crédito e execução por operação · % do crédito sobre o recebido pelo COMAE; % da execução sobre tudo o que entrou na operação (COMAE + direto às OM)
           </p>
         </div>
         {graficos.length > 0 && (

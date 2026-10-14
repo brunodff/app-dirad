@@ -8,7 +8,87 @@ export type MovUnidade = {
   tipo: 'entrada' | 'saida' | 'cambio';
   ug: string;
   descricao: string;
+  /** Quem pediu/mandou o crédito (ex.: EMAER-5SC2, COMGAP, Exército (destaque)). */
+  origem?: string;
 };
+
+/** Crédito que chegou direto às OM, sem passar pelo COMAE, agrupado por origem. */
+export type CreditoDireto = { total: number; origens: Array<{ origem: string; valor: number }> };
+
+export function creditoDireto(itens: MovUnidade[]): CreditoDireto {
+  const map = new Map<string, number>();
+  for (const m of itens) {
+    if (m.tipo !== 'entrada') continue;
+    const k = m.origem ?? 'origem não identificada';
+    map.set(k, (map.get(k) ?? 0) + m.valor);
+  }
+  const origens = [...map.entries()].map(([origem, valor]) => ({ origem, valor })).sort((a, b) => b.valor - a.valor);
+  return { total: origens.reduce((s, o) => s + o.valor, 0), origens };
+}
+
+/** O crédito direto às OM merece destaque? (ignora resíduos em operações que recebem pelo COMAE) */
+export function diretoRelevante(recebidoComae: number, direto: CreditoDireto): boolean {
+  if (direto.total < 0.01) return false;
+  return Math.abs(recebidoComae) < 0.01 || direto.total >= Math.max(1000, recebidoComae * 0.01);
+}
+
+/**
+ * Nota explicativa da operação quando há crédito que não passou pelo COMAE.
+ * Não renderiza nada quando todo o crédito das OM veio pelo COMAE.
+ */
+export function NotaCreditoDireto({
+  recebidoComae,
+  direto,
+  semCredito = false,
+  grande = false,
+  className = '',
+}: {
+  recebidoComae: number;
+  direto: CreditoDireto;
+  /** Há execução, mas nenhuma movimentação de crédito da operação na planilha. */
+  semCredito?: boolean;
+  grande?: boolean;
+  className?: string;
+}) {
+  const semComae = Math.abs(recebidoComae) < 0.01;
+  if (!semCredito && !diretoRelevante(recebidoComae, direto)) return null;
+
+  const origens = direto.origens.filter(o => o.valor >= 0.01).slice(0, 3);
+  const txt = grande ? 'text-sm' : 'text-[11px]';
+
+  return (
+    <div
+      className={`rounded-lg px-3 py-2 ${txt} leading-snug flex gap-2 ${className}`}
+      style={{ background: '#0F1E36', border: '1px solid #24406A', color: '#A9C4E8' }}
+    >
+      <span className="flex-shrink-0 font-bold" style={{ color: '#5FA8E0' }}>ⓘ</span>
+      <div>
+        {semCredito ? (
+          <p>
+            Há execução nas OM, mas a planilha de crédito não tem nenhuma movimentação desta operação
+            (PI sem crédito identificado).
+          </p>
+        ) : semComae ? (
+          <p>
+            <strong className="text-white">Crédito descentralizado direto às OM, sem passar pelo COMAE:</strong>{' '}
+            <span className="tabular-nums text-white">{brl(direto.total)}</span>. Por isso o Recebido do COMAE
+            aparece zerado — não é crédito que saiu sem chegar.
+          </p>
+        ) : (
+          <p>
+            Além do recebido pelo COMAE, as OM receberam{' '}
+            <span className="tabular-nums text-white">{brl(direto.total)}</span> direto, sem passar pelo COMAE.
+          </p>
+        )}
+        {!semCredito && origens.length > 0 && (
+          <p className="mt-0.5 opacity-80 tabular-nums">
+            Origem: {origens.map(o => `${o.origem} ${brl(o.valor)}`).join(' · ')}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /** Por operação: crédito atual nas unidades e as movimentações que explicam a diferença. */
 export type VisaoUnidades = { atual: number; itens: MovUnidade[] };

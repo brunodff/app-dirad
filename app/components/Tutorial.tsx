@@ -67,8 +67,8 @@ const STEPS: Step[] = [
   },
   {
     aba: 'power-bi',
-    titulo: 'Painel Power BI',
-    descricao: 'Painel interativo com os dados orçamentários consolidados, ideal para apresentações em reuniões. Os gráficos e tabelas refletem a posição mais recente sincronizada com o sistema.',
+    titulo: 'Painel COMAE',
+    descricao: 'O antigo painel do Power BI, agora dentro do sistema: páginas COMAE e Unidades, com os mesmos números e filtros. Atualiza sozinho a cada sincronização da planilha. Passe o mouse numa operação para ver o detalhe do disponível.',
     posicao: 'center',
   },
   {

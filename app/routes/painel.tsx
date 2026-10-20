@@ -9,7 +9,9 @@ import { supabaseAdmin, fetchAll } from '~/lib/supabase.server';
 import { Sidebar } from '~/components/Sidebar';
 import { FeedView, type MovimentoRow } from '~/components/FeedView';
 import { OperacoesView, type ResumoRow } from '~/components/OperacoesView';
-import { PowerBIView } from '~/components/PowerBIView';
+import { PainelComaeView } from '~/components/PainelComaeView';
+import { carregarDadosComae } from '~/lib/painelComae.server';
+import type { DadosComae } from '~/lib/painelComae';
 import { GraficosView, type GraficoOpRow } from '~/components/GraficosView';
 import { DevView, type UsuarioAnalytics, type SyncLogRow, type NavegacaoRow } from '~/components/DevView';
 import { DesativadosView, type ConfigOperacao, type MovimentoDescartado } from '~/components/DesativadosView';
@@ -1118,6 +1120,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let ultimaSync:             string | null          = null;
   let proximoNumDesc:         number | null          = null;
   let modelos:                SiscodecModelo[]       = [];
+  let painelComae:            DadosComae | null      = null;
+
+  /* ── PAINEL COMAE (réplica do Power BI COMAE V2) ── */
+  if (aba === 'power-bi') {
+    // Os pedidos vêm à parte (/api/painel-comae), só quando a lista é aberta.
+    painelComae = { ...(await carregarDadosComae(db)), pedidos: [] };
+  }
 
   /* ── FEED ── */
   if (aba === 'feed') {
@@ -1552,6 +1561,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     podeEditar: PODE_EDITAR.includes(user.perfil),
     empenhoRows, conciliacaoExec, graficos, ultimaSync, quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
     movimentosDescartados, siscodecPedidos, apiToken, usuariosGerencial, solicitacoes, proximoNumDesc, modelos,
+    painelComae,
     supabaseUrl: optEnv('SUPABASE_URL'),
     anonKey:     optEnv('SUPABASE_ANON_KEY'),
   };
@@ -1587,7 +1597,7 @@ export default function Painel() {
     podeEditar, empenhoRows, conciliacaoExec, graficos, ultimaSync,
     quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
     movimentosDescartados, siscodecPedidos, apiToken, usuariosGerencial, solicitacoes, proximoNumDesc, modelos,
-    supabaseUrl, anonKey,
+    supabaseUrl, anonKey, painelComae,
   } = useLoaderData<typeof loader>();
 
   usePresenca(user.user_id, user.nome, user.perfil, supabaseUrl, anonKey);
@@ -1635,7 +1645,7 @@ export default function Painel() {
       case 'configuracoes':
         return <ConfiguracoesView usuarios={usuariosGerencial} userAtual={user} />;
       case 'power-bi':
-        return <PowerBIView />;
+        return painelComae ? <PainelComaeView dados={painelComae} podeEditar={podeEditar} /> : null;
       case 'graficos':
         return <GraficosView graficos={graficos} filtrosAtivos={filtrosAtivos} opcoes={opcoesFiltro} ultimaSync={ultimaSync} />;
       case 'ferramentas':

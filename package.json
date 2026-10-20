@@ -7,7 +7,8 @@
     "build:cf": "react-router build",
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
-    "typecheck": "react-router typegen && tsc"
+    "typecheck": "react-router typegen && tsc",
+    "test": "node --test \"tests/**/*.test.mjs\""
   },
   "dependencies": {
     "@react-router/cloudflare": "^7.9.5",

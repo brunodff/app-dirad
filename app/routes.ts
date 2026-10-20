@@ -11,4 +11,5 @@ export default [
   route("/aceite-convite", "routes/aceite-convite.tsx"),
   route("/api/pdf-solicitacao", "routes/api.pdf-solicitacao.ts"),
   route("/api/empenhos-op",    "routes/api.empenhos-op.ts"),
+  route("/api/painel-comae",   "routes/api.painel-comae.ts"),
 ] satisfies RouteConfig;

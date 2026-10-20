@@ -68,7 +68,7 @@ const ABA_LABELS: Record<string, string> = {
   siscodec:      'SISCODEC',
   desativados:   'Desativados',
   configuracoes: 'Configurações',
-  'power-bi':    'Power BI',
+  'power-bi':    'Painel COMAE',
   'graficos':    'Gráficos',
   dev:           'Analytics',
 };

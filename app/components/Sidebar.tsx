@@ -169,9 +169,9 @@ export function Sidebar({ user, abaAtiva }: Props) {
         <div className="my-3 border-t" style={{ borderColor: '#1A2840' }} />
         <NavItemEl item={{ id: 'configuracoes', label: 'Configurações', icon: ICONS.configuracoes }} />
 
-        {/* Power BI */}
+        {/* Painel COMAE (antigo Power BI) */}
         <div className="my-3 border-t" style={{ borderColor: '#1A2840' }} />
-        <NavItemEl item={{ id: 'power-bi', label: 'Power BI', icon: ICONS.powerbi }} />
+        <NavItemEl item={{ id: 'power-bi', label: 'Painel COMAE', icon: ICONS.powerbi }} />
         <NavItemEl item={{ id: 'graficos', label: 'Gráficos', icon: ICONS.graficos }} />
 
         {/* DEV */}

@@ -6,6 +6,7 @@ export default [
   route("/logout",  "routes/logout.ts"),
   route("/painel",  "routes/painel.tsx"),
   route("/api/sync",      "routes/api.sync.ts"),
+  route("/api/sync-comae", "routes/api.sync-comae.ts"),
   route("/api/siscodec",  "routes/api.siscodec.ts"),
   route("/api/heartbeat", "routes/api.heartbeat.ts"),
   route("/aceite-convite", "routes/aceite-convite.tsx"),

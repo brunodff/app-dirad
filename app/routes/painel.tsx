@@ -13,6 +13,8 @@ import { PainelComaeView } from '~/components/PainelComaeView';
 import { carregarDadosComae } from '~/lib/painelComae.server';
 import type { DadosComae } from '~/lib/painelComae';
 import { GraficosView, type GraficoOpRow } from '~/components/GraficosView';
+import { ComparativoView } from '~/components/ComparativoView';
+import { calcularComparativo, type ComparativoDados, type LinhaComae } from '~/lib/creditoComae';
 import { DevView, type UsuarioAnalytics, type SyncLogRow, type NavegacaoRow } from '~/components/DevView';
 import { DesativadosView, type ConfigOperacao, type MovimentoDescartado } from '~/components/DesativadosView';
 import { ExecucaoView, type EmpenhoDbRow } from '~/components/ExecucaoView';
@@ -79,7 +81,7 @@ function buildConviteHtml({ email, actionLink, perfil, convidadoPor }: {
 
 const ABAS_VALIDAS = [
   'feed', 'operacoes', 'execucao', 'unidades', 'naturezas', 'conferencia',
-  'desativados', 'configuracoes', 'power-bi', 'graficos', 'dev', 'rascunho', 'siscodec', 'ferramentas',
+  'desativados', 'configuracoes', 'power-bi', 'graficos', 'comparativo', 'dev', 'rascunho', 'siscodec', 'ferramentas',
 ] as const;
 type AbaId = (typeof ABAS_VALIDAS)[number];
 
@@ -1108,6 +1110,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let empenhoRows:            EmpenhoDbRow[]         = [];
   let conciliacaoExec: ConciliacaoUnidades | null = null;
   let graficos: GraficoOpRow[] = [];
+  let comparativo: ComparativoDados | null = null;
   let quadros:                Quadro[]               = [];
   let quadroAtivo:            Quadro | null          = null;
   let rascunhoItens:          RascunhoItem[]         = [];
@@ -1322,6 +1325,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     ultimaSync = String((syncRaw as { concluido_em?: unknown } | null)?.concluido_em ?? '') || null;
+  }
+
+  /* ── COMPARATIVO (aba CREDITO_COMAE, todos os anos) ── */
+  if (aba === 'comparativo') {
+    const { data: ultimoLote, error: loteErr } = await db.from('credito_comae').select('lote')
+      .order('lote', { ascending: false }).limit(1).maybeSingle();
+    const lote = (ultimoLote as { lote?: number } | null)?.lote;
+    if (!loteErr && lote != null) {
+      // Pernas na DIRAD e no CELOG bastam: o cálculo usa a do CELOG e exige contrapartida na DIRAD
+      const { data: pernas } = await fetchAll<LinhaComae>(() => db
+        .from('credito_comae')
+        .select('ano, acao_cod, pi_cod, pi_nome, ug_exec_cod, data, nc, descricao, ug_resp_cod, nd_cod, valor')
+        .eq('lote', lote)
+        .in('ug_exec_cod', ['120002', '120071'])
+        .order('id'));
+      comparativo = calcularComparativo(pernas.map(p => ({ ...p, valor: Number(p.valor) })));
+    }
   }
 
   /* ── GRÁFICOS ── */
@@ -1559,7 +1579,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     movimentos, totaisGlobais, resumo, desativadas,
     usuarios, syncLogs, navegacoes, atividadeHoje,
     podeEditar: PODE_EDITAR.includes(user.perfil),
-    empenhoRows, conciliacaoExec, graficos, ultimaSync, quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
+    empenhoRows, conciliacaoExec, graficos, comparativo, ultimaSync, quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
     movimentosDescartados, siscodecPedidos, apiToken, usuariosGerencial, solicitacoes, proximoNumDesc, modelos,
     painelComae,
     supabaseUrl: optEnv('SUPABASE_URL'),
@@ -1594,7 +1614,7 @@ export default function Painel() {
     user, aba, filtrosAtivos, opcoesFiltro,
     movimentos, totaisGlobais, resumo, desativadas,
     usuarios, syncLogs, navegacoes, atividadeHoje,
-    podeEditar, empenhoRows, conciliacaoExec, graficos, ultimaSync,
+    podeEditar, empenhoRows, conciliacaoExec, graficos, comparativo, ultimaSync,
     quadros, quadroAtivo, rascunhoItens, rascunhoMovimentos,
     movimentosDescartados, siscodecPedidos, apiToken, usuariosGerencial, solicitacoes, proximoNumDesc, modelos,
     supabaseUrl, anonKey, painelComae,
@@ -1648,6 +1668,8 @@ export default function Painel() {
         return painelComae ? <PainelComaeView dados={painelComae} podeEditar={podeEditar} /> : null;
       case 'graficos':
         return <GraficosView graficos={graficos} filtrosAtivos={filtrosAtivos} opcoes={opcoesFiltro} ultimaSync={ultimaSync} />;
+      case 'comparativo':
+        return <ComparativoView dados={comparativo} />;
       case 'ferramentas':
         return <FerramentasView />;
       case 'dev':

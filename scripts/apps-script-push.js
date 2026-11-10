@@ -78,6 +78,40 @@ function pushParaComaeGerencial() {
   }
 }
 
+// ── CREDITO_COMAE (todos os anos) → aba Comparativo ─────────────────────────
+/**
+ * Envia a aba CREDITO_COMAE (relatório do Tesouro Gerencial, todos os exercícios) para
+ * POST /api/sync-comae. Só envia quando a aba mudou desde o último envio com sucesso.
+ * Usa o mesmo token guardado em Propriedades do script (COMAE_TOKEN).
+ * Pode ser chamada no fim de pushParaComaeGerencial() ou num gatilho próprio.
+ */
+function pushCreditoComae() {
+  var aba = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CREDITO_COMAE');
+  if (!aba) { Logger.log('[CREDITO_COMAE] Aba não encontrada.'); return; }
+
+  // Valores exibidos (datas dd/mm/aaaa, números 1234,56), só as colunas A:R do relatório
+  var linhas = aba.getRange(1, 1, aba.getLastRow(), 18).getDisplayValues();
+  var json   = JSON.stringify(linhas);
+  var hash   = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, json));
+
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('CREDITO_COMAE_HASH') === hash) {
+    Logger.log('[CREDITO_COMAE] Sem mudanças — nada a enviar.');
+    return;
+  }
+
+  var resp = UrlFetchApp.fetch('https://comaegerencial.app/api/sync-comae', {
+    method: 'post',
+    contentType: 'application/json',
+    muteHttpExceptions: true,
+    payload: JSON.stringify({ token: props.getProperty('COMAE_TOKEN'), linhas: linhas })
+  });
+
+  var codigo = resp.getResponseCode();
+  Logger.log('[CREDITO_COMAE] HTTP ' + codigo + ': ' + resp.getContentText().slice(0, 300));
+  if (codigo === 200) props.setProperty('CREDITO_COMAE_HASH', hash);
+}
+
 // ── POLLING ───────────────────────────────────────────────────────────────────
 /**
  * Instala trigger de tempo para chamar pushParaComaeGerencial a cada 5 minutos.

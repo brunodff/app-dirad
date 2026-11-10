@@ -70,6 +70,7 @@ const ABA_LABELS: Record<string, string> = {
   configuracoes: 'Configurações',
   'power-bi':    'Painel COMAE',
   'graficos':    'Gráficos',
+  'comparativo': 'Comparativo',
   dev:           'Analytics',
 };
 

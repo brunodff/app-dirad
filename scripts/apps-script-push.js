@@ -59,26 +59,36 @@ function verificarEEnviar() {
   let falha = null;
   try {
     const props = PropertiesService.getScriptProperties();
-    const digitalFonte = impressaoDigitalFonte_();
 
-    if (digitalFonte !== props.getProperty('FONTE_HASH')) {
-      Logger.log('[COMAE] Relatório mudou — rodando sincronizarTudo().');
-      if (typeof sincronizarTudo !== 'function') {
-        falha = new Error('sincronizarTudo() não existe neste projeto — a BD não foi remontada.');
-      } else {
-        try {
-          sincronizarTudo();      // remonta BD_* e, no final, chama pushParaComaeGerencial()
-          props.setProperty('FONTE_HASH', digitalFonte);
-        } catch (e) {
-          // Ex.: sincronizarTudo() usa SpreadsheetApp.getUi(), que não existe em gatilho.
-          // Não grava o hash: tenta de novo no próximo ciclo.
-          falha = new Error('sincronizarTudo() falhou no gatilho: ' + e.message);
-        }
+    if (impressaoDigitalFonte_() === props.getProperty('FONTE_HASH')) {
+      // Nada mudou no relatório: só o reenvio de 1x/hora, sem ler BD nem CREDITO_COMAE à toa
+      const minutos = (Date.now() - Number(props.getProperty('BD_ENVIADO_EM') || 0)) / 60000;
+      if (minutos < REENVIO_MINIMO_MIN) {
+        Logger.log('[COMAE] Relatório sem mudanças (último envio há ' + Math.round(minutos) + ' min).');
+        return;
+      }
+      pushParaComaeGerencial();
+      return;
+    }
+
+    Logger.log('[COMAE] Relatório mudou — rodando sincronizarTudo().');
+    if (typeof sincronizarTudo !== 'function') {
+      falha = new Error('sincronizarTudo() não existe neste projeto — a BD não foi remontada.');
+    } else {
+      try {
+        sincronizarTudo();        // remonta BD_CREDITO e BD_EMPENHOS
+        // Assinatura tirada DEPOIS: se sincronizarTudo() também escreve nas abas de origem,
+        // a próxima rodada não confunde isso com relatório novo (e não entra em repetição).
+        props.setProperty('FONTE_HASH', impressaoDigitalFonte_());
+      } catch (e) {
+        // Ex.: sincronizarTudo() usa SpreadsheetApp.getUi(), que não existe em gatilho.
+        // Não grava a assinatura: tenta de novo no próximo ciclo.
+        falha = new Error('sincronizarTudo() falhou no gatilho: ' + e.message);
       }
     }
 
-    pushParaComaeGerencial();     // só envia se a BD mudou ou se já passou 1 hora
-    pushCreditoComae();           // só envia se a aba mudou
+    pushParaComaeGerencial();     // envia se a BD mudou
+    pushCreditoComae();           // envia se a aba mudou
   } finally {
     trava.releaseLock();
   }

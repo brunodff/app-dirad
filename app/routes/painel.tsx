@@ -1062,7 +1062,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const db = supabaseAdmin();
 
   // Só busca operações desativadas nas abas que realmente precisam
-  const abasComDesativadas = new Set(['feed', 'operacoes', 'execucao', 'rascunho', 'siscodec', 'desativados', 'graficos']);
+  const abasComDesativadas = new Set(['feed', 'operacoes', 'execucao', 'rascunho', 'siscodec', 'desativados', 'graficos', 'comparativo']);
   const abasComDescartados = new Set(['feed', 'desativados']);
 
   // Atualiza último acesso + registra navegação em paralelo com as queries iniciais (awaited para garantir que as queries seguintes vejam dados frescos)

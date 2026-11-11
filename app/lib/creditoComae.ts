@@ -1,6 +1,6 @@
 /**
- * Aba CREDITO_COMAE (relatório do Tesouro Gerencial, todos os exercícios) e o Comparativo
- * de crédito repassado ao CELOG para combustível e manutenção de aeronaves.
+ * Aba CREDITO_COMAE (relatório do Tesouro Gerencial, todos os exercícios) e o Comparativo do
+ * crédito que o COMAE descentralizou para o CELOG e a DIRMAB (combustível e manutenção de aeronaves).
  *
  * O relatório vem agrupado: célula em branco = mesmo valor da linha de cima (colunas A–Q).
  */
@@ -65,27 +65,24 @@ export function lerCreditoComae(linhas: unknown[][]): LinhaComae[] {
   return out;
 }
 
-// ── Comparativo ───────────────────────────────────────────────────────────────
+// ── Comparativo: COMAE → CELOG / DIRMAB ───────────────────────────────────────
 
-const UG_DIRAD = '120002';
-const UG_CELOG = '120071';
-const UGR_CELOG = '120071';   // crédito do próprio CELOG (combustível)
-const UGR_DIRMAB = '120038';  // crédito da DIRMAB executado pelo CELOG (manutenção)
-const NDS = ['339030', '339039'] as const;
+const UG_COMAE = '120115';
+/** UG responsável de destino → recebedor (combustível fica com o CELOG; manutenção, com a DIRMAB). */
+export const RECEBEDORES: Record<string, 'CELOG' | 'DIRMAB'> = { '120071': 'CELOG', '120038': 'DIRMAB' };
+export const NDS_COMPARATIVO = ['339030', '339039'] as const;
 
 export type Valores = { celog30: number; celog39: number; dirmab30: number; dirmab39: number };
-export type NcComparativo = {
-  ano: number; data: string | null; nc: string; nd: string;
+
+/** Uma descentralização do COMAE para CELOG/DIRMAB (valor +) ou devolução deles ao COMAE (−). */
+export type ItemComparativo = {
+  ano: number; op: string; pi: string; nc: string | null; data: string | null; nd: string;
   recebedor: 'CELOG' | 'DIRMAB'; valor: number; descricao: string;
-  /** Órgão do "PEDIDO NR …/ÓRGÃO/AAAA" citado na NC (COMAE, EMAER-5SC2, COMPREP…). */
+};
+export type NcComparativo = Omit<ItemComparativo, 'op' | 'pi'> & {
+  /** Órgão do "PEDIDO NR …/ÓRGÃO/AAAA" citado no documento (COMAE, EMAER-5SC2, COMPREP…). */
   pedido: string;
 };
-
-export function origemPedido(descricao: string): string {
-  const org = descricao.match(/PEDIDO\s*N[RºO°.]*\s*\d+\s*\/\s*([A-Z0-9-]+)/i)?.[1]
-    ?? descricao.match(/\d+\s*\/\s*(DIRMAB|COMAE|COMGAP|COMPREP|CELOG|EMAER[-A-Z0-9]*)\s*\/\s*\d{4}/i)?.[1];
-  return org ? org.toUpperCase() : 'sem pedido';
-}
 export type LinhaComparativo = {
   chave: string;
   operacao: string;
@@ -98,109 +95,20 @@ export type ComparativoDados = { anos: number[]; linhas: LinhaComparativo[] };
 const zero = (): Valores => ({ celog30: 0, celog39: 0, dirmab30: 0, dirmab39: 0 });
 export const totalValores = (v: Valores | undefined) => (v ? v.celog30 + v.celog39 + v.dirmab30 + v.dirmab39 : 0);
 
-/** O mesmo PI de "Destaques" na ação 2000 é o crédito da Semana da Pátria (como no resto do app). */
-function nomeOperacao(piCod: string, acaoCod: string, piNome: string): string {
+export function origemPedido(descricao: string): string {
+  const org = descricao.match(/PEDIDO\s*N[RºO°.]*\s*\d+\s*\/\s*([A-Z0-9-]+)/i)?.[1]
+    ?? descricao.match(/\d+\s*\/\s*(DIRMAB|COMAE|COMGAP|COMPREP|CELOG|EMAER[-A-Z0-9]*)\s*\/\s*\d{4}/i)?.[1];
+  return org ? org.toUpperCase() : 'sem pedido';
+}
+
+/** O PI "Destaques" na ação 2000 é o crédito da Semana da Pátria (como no resto do app). */
+export function nomeOperacao(piCod: string, acaoCod: string, piNome: string): string {
   if (piCod === 'D0000010000' && acaoCod === '2000') return 'SEMANA DA PATRIA';
   return piNome;
 }
 
-/**
- * Crédito da operação repassado pela DIRAD ao CELOG em 339030/339039, por ano.
- *
- * - Conta a perna do CELOG (UG executora 120071) cuja UGR é o próprio CELOG (combustível) ou a
- *   DIRMAB (manutenção), em NC com contrapartida na DIRAD. É a etapa que aparece nos dois anos:
- *   em 2026 o COMAE descentraliza para a DIRMAB/CELOG por NC; em 2025 a troca de UGR não gerava NC.
- * - Anulações e devoluções do CELOG para a DIRAD entram negativas.
- * - Remanejamentos do CELOG para o fechamento de câmbio ("RMJ … DIRMAB") não são descontados:
- *   o crédito segue para manutenção, paga pelas comissões no exterior.
- */
-export function calcularComparativo(linhas: LinhaComae[]): ComparativoDados {
-  const porDoc = new Map<string, LinhaComae[]>();
-  for (const l of linhas) {
-    if (!l.nc || !l.ano) continue;
-    const ls = porDoc.get(l.nc) ?? [];
-    ls.push(l);
-    porDoc.set(l.nc, ls);
-  }
-
-  const map = new Map<string, LinhaComparativo & { nomes: Map<string, number> }>();
-  const anos = new Set<number>();
-
-  for (const ls of porDoc.values()) {
-    if (!ls.some(l => l.ug_exec_cod === UG_DIRAD)) continue;
-    for (const l of ls) {
-      if (l.ug_exec_cod !== UG_CELOG) continue;
-      if (l.ug_resp_cod !== UGR_CELOG && l.ug_resp_cod !== UGR_DIRMAB) continue;
-      if (!(NDS as readonly string[]).includes(l.nd_cod)) continue;
-      if (l.pi_cod === '-8') continue;
-      if (l.valor < 0 && /RMJ/.test(l.descricao) && /DIRMAB/.test(l.descricao)) continue;
-
-      // Uma linha por PI; o PI "Destaques" separa a Semana da Pátria (ação 2000) dos demais destaques
-      const chave = l.pi_cod === 'D0000010000' ? `${l.pi_cod}|${l.acao_cod}` : l.pi_cod;
-      const linha = map.get(chave) ?? {
-        chave, operacao: '', pi: l.pi_cod,
-        porAno: {} as Record<number, Valores>, ncs: [] as NcComparativo[], nomes: new Map<string, number>(),
-      };
-      const nome = nomeOperacao(l.pi_cod, l.acao_cod, l.pi_nome);
-      linha.nomes.set(nome, (linha.nomes.get(nome) ?? 0) + 1);
-
-      const ano = l.ano!;
-      anos.add(ano);
-      const v = (linha.porAno[ano] ??= zero());
-      const recebedor: NcComparativo['recebedor'] = l.ug_resp_cod === UGR_CELOG ? 'CELOG' : 'DIRMAB';
-      const campo = `${recebedor === 'CELOG' ? 'celog' : 'dirmab'}${l.nd_cod === '339030' ? '30' : '39'}` as keyof Valores;
-      v[campo] = Math.round((v[campo] + l.valor) * 100) / 100;
-
-      linha.ncs.push({
-        ano, data: l.data, nc: l.nc!, nd: l.nd_cod, recebedor, valor: l.valor, descricao: l.descricao,
-        pedido: origemPedido(l.descricao),
-      });
-      map.set(chave, linha);
-    }
-  }
-
-  const porPi: LinhaComparativo[] = [...map.values()].map(({ nomes, ...l }) => ({
-    ...l,
-    // Nome mais frequente do PI (o SIAFI às vezes muda a descrição no meio do ano)
-    operacao: [...nomes.entries()].sort((a, b) => b[1] - a[1])[0][0],
-  }));
-
-  // O PI muda a cada ano (OCS8… em 2025, OCS9… em 2026): junta a mesma operação pelo nome
-  const porOperacao = new Map<string, LinhaComparativo>();
-  const anoDoNome = new Map<string, number>();
-  for (const l of porPi) {
-    const chave = nomeCanonico(l.operacao);
-    const anoMaisRecente = Math.max(...Object.keys(l.porAno).map(Number));
-    const atual = porOperacao.get(chave);
-    if (!atual) {
-      porOperacao.set(chave, { ...l, chave, porAno: { ...l.porAno }, ncs: [...l.ncs] });
-      anoDoNome.set(chave, anoMaisRecente);
-      continue;
-    }
-    for (const [ano, v] of Object.entries(l.porAno)) {
-      const alvo = (atual.porAno[Number(ano)] ??= zero());
-      for (const k of Object.keys(v) as (keyof Valores)[]) alvo[k] = Math.round((alvo[k] + v[k]) * 100) / 100;
-    }
-    atual.ncs.push(...l.ncs);
-    atual.pi = [...new Set([...atual.pi.split(' · '), l.pi])].sort().join(' · ');
-    // Exibe o nome usado no ano mais recente
-    if (anoMaisRecente > (anoDoNome.get(chave) ?? 0)) {
-      atual.operacao = l.operacao;
-      anoDoNome.set(chave, anoMaisRecente);
-    }
-  }
-
-  const linhasOut = [...porOperacao.values()].map(l => ({
-    ...l, ncs: l.ncs.sort((a, b) => (b.data ?? '').localeCompare(a.data ?? '')),
-  }));
-  const maiorTotal = (l: LinhaComparativo) => Math.max(...Object.values(l.porAno).map(totalValores), 0);
-  linhasOut.sort((a, b) => maiorTotal(b) - maiorTotal(a));
-
-  return { anos: [...anos].sort(), linhas: linhasOut };
-}
-
 /** "OP CATRIMANI II" (2025) e "OP CATRIMANI II" (2026) → "CATRIMANI II": sem prefixo, ano e acento. */
-function nomeCanonico(nome: string): string {
+export function nomeCanonico(nome: string): string {
   return nome
     .normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
     .replace(/\s+-\s+A CARGO D[OA] .*$/, '')
@@ -208,4 +116,94 @@ function nomeCanonico(nome: string): string {
     .replace(/\b20\d{2}\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+const normDesc = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * COMAE → CELOG/DIRMAB a partir do relatório (anos que não estão na base do Painel COMAE).
+ *
+ * Em 2026 a passagem é uma NC (UGR COMAE de um lado, UGR CELOG/DIRMAB do outro). Em 2025 era uma
+ * troca de UGR dentro da DIRAD, num documento SEM NC ("-9"): as duas pernas têm a mesma data, UG,
+ * ND e descrição. Por isso o documento é a NC ou, sem ela, data + UG + ND + descrição.
+ * Mesmas exclusões do painel: correção de UGR não é descentralização; "anulação para
+ * descentralização" não é devolução.
+ */
+export function descentralizacoesDoRelatorio(linhas: LinhaComae[], anos: Set<number>): ItemComparativo[] {
+  const grupos = new Map<string, LinhaComae[]>();
+  for (const l of linhas) {
+    if (!l.ano || !anos.has(l.ano) || !l.valor) continue;
+    const doc = l.nc ? `NC|${l.nc}` : `DOC|${l.data}|${l.ug_exec_cod}|${l.nd_cod}|${normDesc(l.descricao)}`;
+    const k = `${doc}|${l.pi_cod}`;
+    const g = grupos.get(k) ?? [];
+    g.push(l);
+    grupos.set(k, g);
+  }
+
+  const out: ItemComparativo[] = [];
+  for (const ls of grupos.values()) {
+    const comaeSai = ls.some(x => x.ug_resp_cod === UG_COMAE && x.valor < 0);
+    const comaeRecebe = ls.some(x => x.ug_resp_cod === UG_COMAE && x.valor > 0);
+    if (!comaeSai && !comaeRecebe) continue;
+    for (const x of ls) {
+      const recebedor = RECEBEDORES[x.ug_resp_cod];
+      if (!recebedor || !(NDS_COMPARATIVO as readonly string[]).includes(x.nd_cod)) continue;
+      const d = normDesc(x.descricao);
+      if (d.includes('CORRECAO DE UGR')) continue;
+      const desc = x.valor > 0 && comaeSai;
+      const devol = x.valor < 0 && comaeRecebe && !d.includes('ANULACAO PARA DESCENTRALIZACAO');
+      if (!desc && !devol) continue;
+      out.push({
+        ano: x.ano!, op: nomeOperacao(x.pi_cod, x.acao_cod, x.pi_nome), pi: x.pi_cod, nc: x.nc, data: x.data,
+        nd: x.nd_cod, recebedor, valor: x.valor, descricao: x.descricao,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Junta os itens por operação e ano. A mesma operação muda de PI a cada ano (OCS8… em 2025,
+ * OCS9… em 2026), então a junção é pelo nome. `piPorNome` (nome canônico → PI) completa o PI dos
+ * itens que vêm do painel, que não trazem o código.
+ */
+export function calcularComparativo(itens: ItemComparativo[], piPorNome: Map<string, string> = new Map()): ComparativoDados {
+  const map = new Map<string, LinhaComparativo & { nomes: Map<string, { n: number; ano: number }>; pis: Set<string> }>();
+  const anos = new Set<number>();
+
+  for (const it of itens) {
+    const chave = nomeCanonico(it.op);
+    const linha = map.get(chave) ?? {
+      chave, operacao: it.op, pi: '', porAno: {} as Record<number, Valores>, ncs: [] as NcComparativo[],
+      nomes: new Map<string, { n: number; ano: number }>(), pis: new Set<string>(),
+    };
+    const nome = linha.nomes.get(it.op) ?? { n: 0, ano: it.ano };
+    nome.n += 1; nome.ano = Math.max(nome.ano, it.ano);
+    linha.nomes.set(it.op, nome);
+    const pi = it.pi || piPorNome.get(chave);
+    if (pi) linha.pis.add(pi);
+
+    anos.add(it.ano);
+    const v = (linha.porAno[it.ano] ??= zero());
+    const campo = `${it.recebedor === 'CELOG' ? 'celog' : 'dirmab'}${it.nd === '339030' ? '30' : '39'}` as keyof Valores;
+    v[campo] = Math.round((v[campo] + it.valor) * 100) / 100;
+
+    linha.ncs.push({
+      ano: it.ano, data: it.data, nc: it.nc, nd: it.nd, recebedor: it.recebedor, valor: Math.round(it.valor * 100) / 100,
+      descricao: it.descricao, pedido: origemPedido(it.descricao),
+    });
+    map.set(chave, linha);
+  }
+
+  const linhas: LinhaComparativo[] = [...map.values()].map(({ nomes, pis, ...l }) => ({
+    ...l,
+    // Nome usado no ano mais recente; no empate, o mais frequente
+    operacao: [...nomes.entries()].sort((a, b) => b[1].ano - a[1].ano || b[1].n - a[1].n)[0][0],
+    pi: [...pis].sort().join(' · '),
+    ncs: l.ncs.sort((a, b) => (b.data ?? '').localeCompare(a.data ?? '')),
+  }));
+  const maiorTotal = (l: LinhaComparativo) => Math.max(...Object.values(l.porAno).map(totalValores), 0);
+  linhas.sort((a, b) => maiorTotal(b) - maiorTotal(a));
+
+  return { anos: [...anos].sort(), linhas };
 }

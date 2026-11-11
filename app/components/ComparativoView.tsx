@@ -131,7 +131,7 @@ function DetalheNcs({ linha, anoAnt, anoAtual, colSpan }: { linha: LinhaComparat
     <tr>
       <td colSpan={colSpan} className="px-4 pb-3 pt-1" style={{ background: '#0C1526' }}>
         <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">
-          {ncs.length} NC{ncs.length === 1 ? '' : 's'} · PI {linha.pi}
+          {ncs.length} documento{ncs.length === 1 ? '' : 's'}{linha.pi ? ` · PI ${linha.pi}` : ''}
         </p>
         <div className="max-h-72 overflow-y-auto">
           <table className="w-full text-[11px]">
@@ -139,7 +139,7 @@ function DetalheNcs({ linha, anoAnt, anoAtual, colSpan }: { linha: LinhaComparat
               {ncs.map((n, i) => (
                 <tr key={n.nc + n.nd + n.recebedor + i} className="align-top" style={{ borderTop: '1px solid #16243A' }}>
                   <td className="py-1 pr-3 tabular-nums" style={{ color: n.ano === anoAtual ? COR_ATUAL : COR_ANT }}>{dataBr(n.data)}</td>
-                  <td className="py-1 pr-3 font-mono text-slate-400">{n.nc}</td>
+                  <td className="py-1 pr-3 font-mono text-slate-400" title={n.nc ? undefined : "Troca de UGR na DIRAD, em documento sem NC"}>{n.nc ?? "sem NC"}</td>
                   <td className="py-1 pr-3 font-mono text-slate-400">{n.nd}</td>
                   <td className="py-1 pr-3 text-slate-400">{n.recebedor}</td>
                   <td className="py-1 pr-3 text-slate-500 whitespace-nowrap" title="Órgão do pedido citado na NC">{n.pedido}</td>
@@ -190,7 +190,7 @@ export function ComparativoView({ dados }: { dados: ComparativoDados | null }) {
         <div>
           <h2 className="text-sm font-bold text-white mb-0.5">Comparativo {anoAnt} × {anoAtual}</h2>
           <p className="text-[10px] text-slate-500">
-            Crédito das operações repassado ao CELOG para combustível (339030) e manutenção de aeronaves (339039)
+            Crédito descentralizado pelo COMAE para o CELOG (combustível, 339030) e a DIRMAB (manutenção de aeronaves, 339039)
           </p>
         </div>
         <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid #1E3050' }}>
@@ -293,16 +293,17 @@ export function ComparativoView({ dados }: { dados: ComparativoDados | null }) {
         <section className="rounded-lg px-4 py-3 text-[11px] leading-relaxed space-y-1" style={{ background: '#0F1E36', border: '1px solid #24406A', color: '#A9C4E8' }}>
           <p className="font-semibold text-white">Como os valores são calculados</p>
           <p>
-            Soma o crédito de cada operação que a DIRAD repassou ao CELOG (UG 120071) em 339030 e 339039: com UGR do próprio CELOG
-            (combustível) ou da DIRMAB (manutenção). É a etapa que aparece nos dois anos — em {anoAtual} o COMAE descentraliza para a
-            DIRMAB/CELOG por NC; em {anoAnt} a passagem para a UGR da DIRMAB/CELOG não gerava NC no relatório.
+            Soma o que o COMAE descentralizou para o CELOG (UGR 120071, combustível) e para a DIRMAB (UGR 120038, manutenção) em
+            339030 e 339039, menos o que eles devolveram ao COMAE. Em {anoAtual} é o mesmo cálculo do Descentralizado do Painel COMAE
+            (filtre a OM CELOG ou DIRMAB lá e os valores batem). Em {anoAnt} a passagem do crédito da UGR do COMAE para a do
+            CELOG/DIRMAB era feita na DIRAD em documento sem NC; ela é lida do relatório CREDITO_COMAE.
           </p>
           <p>
-            Anulações e devoluções do CELOG para a DIRAD entram negativas. Remanejamentos do CELOG para o fechamento de câmbio não são
-            descontados: o crédito continua indo para manutenção, paga pelas comissões no exterior. Operações têm PI diferente a cada
-            ano (ex.: Ágata Amazônia 2025 × Ágata Amazônia Ocidental 2026) e por isso aparecem em linhas separadas.
+            Crédito que chegou ao CELOG/DIRMAB por outros órgãos (EMAER, COMGAP, COMPREP) sem passar pelo COMAE não entra. A mesma
+            operação muda de PI a cada ano e é juntada pelo nome; operações com nomes diferentes (ex.: Ágata Amazônia 2025 × Ágata
+            Amazônia Ocidental 2026) ficam em linhas separadas.
           </p>
-          <p className="opacity-80">Fonte: aba CREDITO_COMAE (Tesouro Gerencial). Clique numa operação para ver as NCs.</p>
+          <p className="opacity-80">Fontes: Painel COMAE ({anoAtual}) e aba CREDITO_COMAE do Tesouro Gerencial ({anoAnt}). Clique numa operação para ver os documentos.</p>
         </section>
       </div>
     </div>

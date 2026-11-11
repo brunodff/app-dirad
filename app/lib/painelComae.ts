@@ -49,10 +49,19 @@ export type EmpenhoBD = {
 
 // ── Dados compactos (servidor → tela) ───────────────────────────────────────
 
-/** Linha da UG responsável COMAE. k: A = recebido [A]; S = saída para unidade; D = devolução ao COMAE. */
+/**
+ * Linha da UG responsável COMAE. k: A = recebido [A]; S = saída para unidade; D = devolução ao COMAE.
+ * om: unidade do outro lado da saída/devolução (UG responsável, como na planilha); '' em A.
+ */
 export type MovComae = {
   ano: string; op: string; opEf: string; nd: string; ndNome: string; ugExec: string; valor: number;
-  k: 'A' | 'S' | 'D';
+  k: 'A' | 'S' | 'D'; om: string;
+};
+
+/** Saída (+) ou devolução (−) do COMAE para uma unidade, por NC — base do Comparativo. */
+export type DescentralizacaoNc = {
+  ano: string; op: string; opEf: string; nc: string; data: string | null; nd: string; ndNome: string;
+  omCod: string; om: string; valor: number; desc: string; pedido: string;
 };
 
 /** Linha classificada na visão antiga do BI (lista de pedidos). */
@@ -253,6 +262,59 @@ export function classificar(linhas: Linha[]): Classificacao[] {
 
 const CORTE_DESCRICAO = 260;
 
+function indicePorNC(linhas: Linha[]): Map<string, Linha[]> {
+  const m = new Map<string, Linha[]>();
+  for (const l of linhas) {
+    if (!m.has(l.nc)) m.set(l.nc, []);
+    m.get(l.nc)!.push(l);
+  }
+  return m;
+}
+
+type Destino = { om: string; omCod: string; fracao: number };
+
+/**
+ * Unidades do outro lado de uma saída (S) ou devolução (D) do COMAE: mesma NC e operação, sinal oposto
+ * (o mesmo pareamento do EH_SAIDA_COMAE / EH_DEVOLUCAO_COMAE), de preferência na mesma ND.
+ * Com mais de uma unidade na NC, o valor é repartido na proporção de cada uma.
+ */
+function destinosDe(l: Linha, k: 'S' | 'D', daNC: Linha[]): Destino[] {
+  let cand = daNC.filter((x) => x.op === l.op && !x.comae && x.ncValida && (k === 'S' ? x.valor > 0 : x.valor < 0));
+  const mesmaNd = cand.filter((x) => x.nd === l.nd);
+  if (mesmaNd.length) cand = mesmaNd;
+  const porUG = new Map<string, { om: string; omCod: string; v: number }>();
+  for (const x of cand) {
+    const u = porUG.get(x.ugResp) ?? { om: x.ugRespNome || x.ugResp, omCod: x.ugResp, v: 0 };
+    u.v += Math.abs(x.valor);
+    porUG.set(x.ugResp, u);
+  }
+  const total = [...porUG.values()].reduce((s, u) => s + u.v, 0);
+  if (!total) return [{ om: '', omCod: '', fracao: 1 }];
+  return [...porUG.values()].map((u) => ({ om: u.om, omCod: u.omCod, fracao: u.v / total }));
+}
+
+/**
+ * Saídas e devoluções do COMAE por NC, com a unidade de destino (valor + = descentralizado,
+ * − = devolvido). A soma é o Descentralizado [B] do painel.
+ */
+export function descentralizacoesComae(creditos: CreditoBD[]): DescentralizacaoNc[] {
+  const linhas = creditos.map(linhaDe);
+  const cls = classificar(linhas);
+  const porNC = indicePorNC(linhas);
+  const out: DescentralizacaoNc[] = [];
+  linhas.forEach((l, i) => {
+    const k = cls[i].ehSaidaComae ? 'S' : cls[i].ehDevolucaoComae ? 'D' : null;
+    if (!l.comae || !k) return;
+    for (const d of destinosDe(l, k, porNC.get(l.nc) ?? [])) {
+      out.push({
+        ano: l.ano, op: l.op, opEf: operacaoEfetiva(l.op, l.descNorm), nc: l.nc, data: l.data, nd: l.nd, ndNome: l.ndNome,
+        omCod: d.omCod, om: d.om, valor: -l.valor * d.fracao, desc: l.desc, pedido: pedidoLimpo(l.pedido),
+      });
+    }
+  });
+  return out;
+}
+
 /**
  * @param desativadas operações desativadas no sistema (config_operacoes). Saem de todos os visuais,
  *   mas as linhas delas continuam valendo nos pareamentos das notas (a classificação olha a base
@@ -261,6 +323,7 @@ const CORTE_DESCRICAO = 260;
 export function prepararDadosComae(creditos: CreditoBD[], empenhos: EmpenhoBD[], desativadas: string[] = []): DadosComae {
   const linhas = creditos.map(linhaDe);
   const cls = classificar(linhas);
+  const porNC = indicePorNC(linhas);
   const fora = new Set(desativadas.map(txt).filter(Boolean));
   const encontradas = new Set<string>();
   /** A operação (pelo nome da planilha ou pela operação efetiva) está desativada? */
@@ -294,11 +357,14 @@ export function prepararDadosComae(creditos: CreditoBD[], empenhos: EmpenhoBD[],
     if (l.comae) {
       if (!nomeComae && l.ugRespNome) nomeComae = l.ugRespNome;
       const k: MovComae['k'] = c.ehSaidaComae ? 'S' : c.ehDevolucaoComae ? 'D' : 'A';
-      const chave = [l.ano, l.op, opEf, l.nd, l.ugExecNome, k].join(sep);
-      const m = comaeAgr.get(chave) ?? { ano: l.ano, op: l.op, opEf, nd: l.nd, ndNome: l.ndNome, ugExec: l.ugExecNome, valor: 0, k };
-      m.valor += l.valor;
-      if (!m.ndNome) m.ndNome = l.ndNome;
-      comaeAgr.set(chave, m);
+      const partes: Destino[] = k === 'A' ? [{ om: '', omCod: '', fracao: 1 }] : destinosDe(l, k, porNC.get(l.nc) ?? []);
+      for (const p of partes) {
+        const chave = [l.ano, l.op, opEf, l.nd, l.ugExecNome, k, p.om].join(sep);
+        const m = comaeAgr.get(chave) ?? { ano: l.ano, op: l.op, opEf, nd: l.nd, ndNome: l.ndNome, ugExec: l.ugExecNome, valor: 0, k, om: p.om };
+        m.valor += l.valor * p.fracao;
+        if (!m.ndNome) m.ndNome = l.ndNome;
+        comaeAgr.set(chave, m);
+      }
     }
     if (c.visaoRecebido || c.ehDescentralizado) {
       // a planilha traz caracteres de controle no meio de algumas descrições
@@ -361,8 +427,16 @@ export type LinhaDetalhe = { ugExec: string; ugResp: string; nd: string; valor: 
 export type Detalhe = { linhas: LinhaDetalhe[]; total: number; fonte: 'empenhos' | 'credito' };
 
 export type PaginaComae = {
-  cabecalho: { recebido: number; descentralizado: number };
-  nds: { visao: 'Recebido' | 'Descentralizado'; total: number; cards: { nd: string; ndNome: string; valor: number; pct: number }[] };
+  cabecalho: {
+    recebido: number; descentralizado: number;
+    /** Filtro de OM numa unidade: o que o COMAE descentralizou para ela e o que ela recebeu por outros meios. */
+    om: { nome: string; descentralizado: number; recebidoDireto: number } | null;
+  };
+  nds: {
+    visao: 'Recebido' | 'Descentralizado'; total: number; cards: { nd: string; ndNome: string; valor: number; pct: number }[];
+    /** OM filtrada (as NDs mostram o descentralizado pelo COMAE para ela). */
+    om: string | null;
+  };
   controle: {
     linhas: { opEf: string; rotulo: string; a: number; b: number; e: number; d: number }[];
     total: { a: number; b: number; e: number; d: number };
@@ -390,6 +464,11 @@ export function opcoesComae(d: DadosComae, f: Pick<FiltroComae, 'ano' | 'operaca
   for (const r of doAno) {
     if (f.operacao && operacaoCurta(r.op) !== f.operacao) continue;
     porOM.set(r.ugResp, (porOM.get(r.ugResp) ?? 0) + r.valor);
+  }
+  // Unidades que receberam descentralização do COMAE também entram no filtro de OM
+  for (const m of d.comae) {
+    if (m.k === 'A' || !m.om || (f.ano && m.ano !== f.ano) || (f.operacao && operacaoCurta(m.op) !== f.operacao)) continue;
+    porOM.set(m.om, (porOM.get(m.om) ?? 0) + Math.abs(m.valor));
   }
   const comValor = (m: Map<string, number>) => [...m].filter(([, v]) => !quase0(v)).map(([k]) => k).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   return { operacoes: comValor(porOp), oms: comValor(porOM) };
@@ -419,15 +498,16 @@ function detalheComae(d: DadosComae, opEf: string): Detalhe {
 export function paginaComae(d: DadosComae, f: FiltroComae): PaginaComae {
   const noAno = (ano: string) => !f.ano || ano === f.ano;
   const naOp = (op: string) => !f.operacao || operacaoCurta(op) === f.operacao;
-  const omOk = !f.om || f.om === d.nomeComae;
+  // Filtro numa unidade (não no próprio COMAE): vale o que o COMAE descentralizou para ela
+  const omUnidade = f.om && f.om !== d.nomeComae ? f.om : null;
 
   const contexto = d.comae.filter((m) => noAno(m.ano) && naOp(m.op));
-  const comOM = omOk ? contexto : [];
+  const comOM = omUnidade ? contexto.filter((m) => m.k !== 'A' && m.om === omUnidade) : contexto;
   const valorA = (xs: MovComae[]) => soma(xs.filter((m) => m.k === 'A'), (m) => m.valor);
   const valorB = (xs: MovComae[]) => -soma(xs.filter((m) => m.k === 'S'), (m) => m.valor) - soma(xs.filter((m) => m.k === 'D'), (m) => m.valor);
 
-  // Faixa por ND (segue a visão Recebido / Descentralizado)
-  const visao = f.visao ?? 'Recebido';
+  // Faixa por ND (segue a visão Recebido / Descentralizado; numa unidade, sempre o descentralizado para ela)
+  const visao = omUnidade ? 'Descentralizado' : (f.visao ?? 'Recebido');
   const porND = new Map<string, MovComae[]>();
   for (const m of comOM) {
     if (!porND.has(m.nd)) porND.set(m.nd, []);
@@ -470,9 +550,17 @@ export function paginaComae(d: DadosComae, f: FiltroComae): PaginaComae {
     .map((x) => ({ ...x, rank: posicao(x.valor), detalhe: detalheComae(d, x.opEf) }))
     .sort((a, b) => a.rank - b.rank || a.rotulo.localeCompare(b.rotulo, 'pt-BR'));
 
+  const recebidoDireto = omUnidade
+    ? soma(d.recebidoEmaer.filter((r) => r.ugResp === omUnidade && noAno(r.ano) && naOp(r.op)), (r) => r.valor)
+    : 0;
+
   return {
-    cabecalho: { recebido: valorA(comOM), descentralizado: valorB(comOM) },
-    nds: { visao, total: totalNd, cards },
+    cabecalho: {
+      recebido: omUnidade ? recebidoDireto : valorA(comOM),
+      descentralizado: valorB(comOM),
+      om: omUnidade ? { nome: omUnidade, descentralizado: valorB(comOM), recebidoDireto } : null,
+    },
+    nds: { visao, total: totalNd, cards, om: omUnidade },
     controle: { linhas: linhasControle, total: { a: totA, b: totB, e: totE, d: totA - totB - totE } },
     disponivel,
     pedidos: pedidosComae(d, f),
@@ -524,6 +612,8 @@ export type PaginaUnidades = {
     operacoes: { op: string; rotulo: string; total: number; linhas: { ugResp: string; nd: string; valor: number }[] }[];
   };
   dispPorOperacao: { rank: number; op: string; rotulo: string; valor: number; detalhe: Detalhe }[];
+  /** Com uma OM filtrada: por ND, o que o COMAE descentralizou para ela e a execução dela. */
+  omPorNd: { nd: string; ndNome: string; descentralizado: number; disp: number; aLiq: number; liqPagar: number; pago: number }[] | null;
 };
 
 export function opcoesUnidades(d: DadosComae, f: FiltroUnidades) {
@@ -613,11 +703,36 @@ export function paginaUnidades(d: DadosComae, f: FiltroUnidades): PaginaUnidades
     };
   }).sort((a, b) => a.rank - b.rank || a.rotulo.localeCompare(b.rotulo, 'pt-BR'));
 
+  // OM filtrada: descentralizado pelo COMAE (todos os anos da base) e execução, por ND
+  let omPorNd: PaginaUnidades['omPorNd'] = null;
+  if (f.om && f.om !== d.nomeComae) {
+    type Lin = NonNullable<PaginaUnidades['omPorNd']>[number];
+    const m = new Map<string, Lin>();
+    const linha = (nd: string, ndNome: string) => {
+      const l = m.get(nd) ?? { nd, ndNome, descentralizado: 0, disp: 0, aLiq: 0, liqPagar: 0, pago: 0 };
+      if (!l.ndNome) l.ndNome = ndNome;
+      m.set(nd, l);
+      return l;
+    };
+    for (const x of d.comae) {
+      if (x.k === 'A' || x.om !== f.om || (f.operacao && operacaoCurta(x.op) !== f.operacao)) continue;
+      linha(x.nd, x.ndNome).descentralizado -= x.valor; // saída (−) e devolução (+) do lado do COMAE
+    }
+    for (const e of filtrados) {
+      const l = linha(e.nd, e.ndNome);
+      l.disp += e.disp; l.aLiq += e.aLiq; l.liqPagar += e.liqPagar; l.pago += e.pago;
+    }
+    omPorNd = [...m.values()]
+      .filter((l) => [l.descentralizado, l.disp, l.aLiq, l.liqPagar, l.pago].some((v) => !quase0(v)))
+      .sort((a, b) => a.nd.localeCompare(b.nd));
+  }
+
   return {
     indicadores: { total: ind.disp + ind.aLiq + ind.liqPagar + ind.pago, ...ind },
     unidades,
     dispDetalhe: { linhas: comValor.length, total: soma(comValor, (c) => c.valor), operacoes },
     dispPorOperacao,
+    omPorNd,
   };
 }
 

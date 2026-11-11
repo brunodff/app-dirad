@@ -10,11 +10,14 @@ import { Sidebar } from '~/components/Sidebar';
 import { FeedView, type MovimentoRow } from '~/components/FeedView';
 import { OperacoesView, type ResumoRow } from '~/components/OperacoesView';
 import { PainelComaeView } from '~/components/PainelComaeView';
-import { carregarDadosComae } from '~/lib/painelComae.server';
+import { carregarDadosComae, carregarDescentralizacoesComae } from '~/lib/painelComae.server';
 import type { DadosComae } from '~/lib/painelComae';
 import { GraficosView, type GraficoOpRow } from '~/components/GraficosView';
 import { ComparativoView } from '~/components/ComparativoView';
-import { calcularComparativo, type ComparativoDados, type LinhaComae } from '~/lib/creditoComae';
+import {
+  calcularComparativo, descentralizacoesDoRelatorio, nomeCanonico, nomeOperacao, NDS_COMPARATIVO, RECEBEDORES,
+  type ComparativoDados, type ItemComparativo, type LinhaComae,
+} from '~/lib/creditoComae';
 import { DevView, type UsuarioAnalytics, type SyncLogRow, type NavegacaoRow } from '~/components/DevView';
 import { DesativadosView, type ConfigOperacao, type MovimentoDescartado } from '~/components/DesativadosView';
 import { ExecucaoView, type EmpenhoDbRow } from '~/components/ExecucaoView';
@@ -1329,19 +1332,39 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   /* ── COMPARATIVO (aba CREDITO_COMAE, todos os anos) ── */
   if (aba === 'comparativo') {
-    const { data: ultimoLote, error: loteErr } = await db.from('credito_comae').select('lote')
-      .order('lote', { ascending: false }).limit(1).maybeSingle();
+    // Anos da base do Painel COMAE: os mesmos itens do Descentralizado [B] do painel (os números batem)
+    const [descPainel, { data: ultimoLote, error: loteErr }] = await Promise.all([
+      carregarDescentralizacoesComae(db),
+      db.from('credito_comae').select('lote').order('lote', { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    const anosPainel = new Set(descPainel.map(x => Number(x.ano)).filter(Boolean));
+    const itens: ItemComparativo[] = descPainel
+      .filter(x => RECEBEDORES[x.omCod] && (NDS_COMPARATIVO as readonly string[]).includes(x.nd)
+        && !opsDesativadas.includes(x.op) && Math.abs(x.valor) >= 0.005)
+      .map(x => ({
+        ano: Number(x.ano), op: x.op, pi: '', nc: x.nc, data: x.data, nd: x.nd,
+        recebedor: RECEBEDORES[x.omCod], valor: x.valor, descricao: x.desc,
+      }));
+
+    // Demais anos (ex.: 2025): do relatório CREDITO_COMAE
+    const piPorNome = new Map<string, string>();
     const lote = (ultimoLote as { lote?: number } | null)?.lote;
     if (!loteErr && lote != null) {
-      // Pernas na DIRAD e no CELOG bastam: o cálculo usa a do CELOG e exige contrapartida na DIRAD
-      const { data: pernas } = await fetchAll<LinhaComae>(() => db
-        .from('credito_comae')
-        .select('ano, acao_cod, pi_cod, pi_nome, ug_exec_cod, data, nc, descricao, ug_resp_cod, nd_cod, valor')
-        .eq('lote', lote)
-        .in('ug_exec_cod', ['120002', '120071'])
-        .order('id'));
-      comparativo = calcularComparativo(pernas.map(p => ({ ...p, valor: Number(p.valor) })));
+      const cols = 'ano, acao_cod, pi_cod, pi_nome, ug_exec_cod, data, nc, descricao, ug_resp_cod, nd_cod, valor';
+      const anosLista = `(${[...anosPainel].join(',') || '0'})`;
+      const [{ data: outrosAnos }, { data: pisPainel }] = await Promise.all([
+        fetchAll<LinhaComae>(() => db.from('credito_comae').select(cols).eq('lote', lote).not('ano', 'in', anosLista).order('id')),
+        // só para mostrar o PI das operações que vêm do painel
+        fetchAll<{ pi_cod: string; pi_nome: string; acao_cod: string }>(() => db.from('credito_comae')
+          .select('pi_cod, pi_nome, acao_cod').eq('lote', lote).eq('ug_resp_cod', '120115').in('ano', [...anosPainel]).order('id')),
+      ]);
+      for (const p of [...pisPainel, ...outrosAnos]) {
+        if (p.pi_cod && p.pi_cod !== '-8') piPorNome.set(nomeCanonico(nomeOperacao(p.pi_cod, p.acao_cod, p.pi_nome)), p.pi_cod);
+      }
+      const anosRelatorio = new Set(outrosAnos.map(l => Number(l.ano)).filter(Boolean));
+      itens.push(...descentralizacoesDoRelatorio(outrosAnos.map(l => ({ ...l, valor: Number(l.valor) })), anosRelatorio));
     }
+    comparativo = calcularComparativo(itens, piPorNome);
   }
 
   /* ── GRÁFICOS ── */

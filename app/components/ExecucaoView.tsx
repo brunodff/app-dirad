@@ -322,6 +322,58 @@ function SummaryCards({ total, recebido }: { total: Fases; recebido?: number }) 
   );
 }
 
+/** Execução por natureza de despesa da seleção atual (respeita COMAE/Unidades e os filtros). */
+function PorNatureza({ rows }: { rows: EmpenhoDbRow[] }) {
+  const porNd = [...groupBy(rows, r => r.nd_cod)]
+    .map(([nd_cod, rs]) => ({ nd_cod, nd_nome: rs.find(r => r.nd_nome)?.nd_nome ?? '', ...somarFases(rs) }))
+    .filter(n => Math.abs(n.total) > 0.005)
+    .sort((a, b) => a.nd_cod.localeCompare(b.nd_cod));
+  if (porNd.length === 0) return null;
+  const empenhado = (f: Fases) => f.a_liquidar + f.em_liquidacao + f.liq_a_pagar + f.pago;
+  const total = somarFases(rows);
+  const cols: { label: string; cor: string; v: (f: Fases) => number; title?: string }[] = [
+    { label: 'Disponível',    cor: FASE.disponivel.cor,    v: f => f.disponivel },
+    { label: 'Empenhado',     cor: '#C77DD6',              v: empenhado, title: 'A liquidar + em liquidação + liquidado a pagar + pago' },
+    { label: 'A Liquidar',    cor: FASE.a_liquidar.cor,    v: f => f.a_liquidar },
+    { label: 'Em Liquidação', cor: FASE.em_liquidacao.cor, v: f => f.em_liquidacao },
+    { label: 'Liq. a Pagar',  cor: FASE.liq_a_pagar.cor,   v: f => f.liq_a_pagar },
+    { label: 'Pago',          cor: FASE.pago.cor,          v: f => f.pago },
+    { label: 'Crédito Total', cor: '#EAF1FB',              v: f => f.total },
+  ];
+  return (
+    <div className="rounded-xl overflow-x-auto" style={{ background: '#101C33', border: '1px solid #1E3050' }}>
+      <table className="w-full text-xs" style={{ minWidth: 820 }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid #1E3050' }}>
+            <th className="px-3 py-2 text-left text-[10px] text-slate-500 font-medium uppercase tracking-wider">Natureza de despesa</th>
+            {cols.map(c => (
+              <th key={c.label} title={c.title} className="px-3 py-2 text-right text-[10px] font-medium uppercase tracking-wider" style={{ color: c.cor }}>{c.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {porNd.map(n => (
+            <tr key={n.nd_cod} style={{ borderTop: '1px solid #16243A' }}>
+              <td className="px-3 py-2 text-slate-300">
+                <span className="font-mono text-slate-400 mr-2">{n.nd_cod}</span>{n.nd_nome}
+              </td>
+              {cols.map(c => <td key={c.label} className="px-3 py-2 text-right tabular-nums text-slate-200">{brl(c.v(n))}</td>)}
+            </tr>
+          ))}
+        </tbody>
+        {porNd.length > 1 && (
+          <tfoot>
+            <tr style={{ borderTop: '1px solid #1E3050' }}>
+              <td className="px-3 py-2 text-slate-400 font-semibold">Total</td>
+              {cols.map(c => <td key={c.label} className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: c.cor }}>{brl(c.v(total))}</td>)}
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
+}
+
 function PhaseBar({ total }: { total: Fases }) {
   const t = total.total || 1;
   const segs = [
@@ -463,6 +515,7 @@ export function ExecucaoView({ rows, conciliacao, filtrosAtivos, opcoes, ultimaS
         <div className="px-5 py-4 border-b space-y-3" style={{ borderColor: '#1E3050', background: '#080F1F' }}>
           <SummaryCards total={totalGeral} recebido={conciliacaoAtiva ? conciliacao.recebido : undefined} />
           <PhaseBar total={totalGeral} />
+          <PorNatureza rows={rowsAtivos} />
           {conciliacaoAtiva && (
             <Conciliacao
               recebido={conciliacao.recebido}

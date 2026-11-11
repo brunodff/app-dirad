@@ -4,8 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  fmtMoeda, fmtPct, opcoesComae, operacaoCurta, operacaoEfetiva, paginaComae, paginaUnidades, pedidosComae,
-  prepararDadosComae, rotuloOperacao,
+  descentralizacoesComae, fmtMoeda, fmtPct, opcoesComae, operacaoCurta, operacaoEfetiva, paginaComae, paginaUnidades,
+  pedidosComae, prepararDadosComae, rotuloOperacao,
 } from '../app/lib/painelComae.ts';
 
 const COMAE = { ug_resp_cod: '120115', ug_resp_nome: 'COMANDO DE OPERACOES AEROESPACIAIS' };
@@ -68,13 +68,39 @@ test('faixa de ND: % do total, e visão Descentralizado pela ND de saída', () =
   assert.deepEqual(des.cards.map((c) => [c.nd, c.valor]), [['339030', 550]], 'a ND da linha do COMAE, não a de chegada (339039)');
 });
 
-test('filtro de OM só mexe no cabeçalho e na faixa de ND (como no BI)', () => {
+test('filtro de OM numa unidade: cabeçalho e faixa de ND mostram o que o COMAE descentralizou para ela', () => {
   const p = paginaComae(base(), { ...F, om: 'BASE AEREA FICTICIA' });
-  assert.equal(p.cabecalho.recebido, 0);
-  assert.equal(p.nds.cards.length, 0);
+  assert.deepEqual(p.cabecalho.om, { nome: 'BASE AEREA FICTICIA', descentralizado: 550, recebidoDireto: 0 });
+  assert.equal(p.cabecalho.descentralizado, 550, 'saiu 600 para ela e ela devolveu 50');
+  assert.equal(p.nds.visao, 'Descentralizado');
+  assert.equal(p.nds.om, 'BASE AEREA FICTICIA');
+  assert.deepEqual(p.nds.cards.map((c) => [c.nd, c.valor]), [['339030', 550]]);
+  // controle geral e disponível não mudam com o filtro de OM
   assert.equal(p.controle.linhas.length, 1);
   assert.equal(p.disponivel.length, 1);
-  assert.equal(paginaComae(base(), { ...F, om: COMAE.ug_resp_nome }).cabecalho.recebido, 1000);
+  // a unidade aparece na lista de OMs; o próprio COMAE continua com o recebido [A]
+  assert.ok(opcoesComae(base(), { ano: '2026', operacao: null }).oms.includes('BASE AEREA FICTICIA'));
+  const c = paginaComae(base(), { ...F, om: COMAE.ug_resp_nome });
+  assert.equal(c.cabecalho.recebido, 1000);
+  assert.equal(c.cabecalho.om, null);
+});
+
+test('descentralização com duas unidades na mesma NC é repartida pelo valor de cada uma', () => {
+  const linhas = [
+    cred({ ...COMAE, nc: '2026NC000060', valor: -900 }),
+    cred({ nc: '2026NC000060', valor: 600, ug_resp_cod: '120071', ug_resp_nome: 'CENTRO LOGISTICO DA AERONAUTICA' }),
+    cred({ nc: '2026NC000060', valor: 300, ug_resp_cod: '120038', ug_resp_nome: 'DIRETORIA DE MATERIAL AERONAUTICO E BELICO' }),
+  ];
+  const itens = descentralizacoesComae(linhas);
+  assert.deepEqual(itens.map((x) => [x.omCod, x.valor]).sort(), [['120038', 300], ['120071', 600]]);
+  const d = prepararDadosComae(linhas, []);
+  assert.equal(paginaComae(d, { ...F, om: 'CENTRO LOGISTICO DA AERONAUTICA' }).cabecalho.descentralizado, 600);
+});
+
+test('página Unidades com OM: descentralizado pelo COMAE e execução lado a lado, por ND', () => {
+  const u = paginaUnidades(base(), { operacao: null, om: 'BASE AEREA FICTICIA' });
+  assert.deepEqual(u.omPorNd, [{ nd: '339030', ndNome: 'MATERIAL DE CONSUMO', descentralizado: 550, disp: 500, aLiq: 40, liqPagar: 20, pago: 10 }]);
+  assert.equal(paginaUnidades(base(), { operacao: null, om: null }).omPorNd, null);
 });
 
 test('crédito disponível: vem dos empenhos; sem PI próprio, do crédito; zero sai da lista; posição densa', () => {

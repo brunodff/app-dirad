@@ -159,14 +159,53 @@ export function calcularComparativo(linhas: LinhaComae[]): ComparativoDados {
     }
   }
 
-  const linhasOut: LinhaComparativo[] = [...map.values()].map(({ nomes, ...l }) => ({
+  const porPi: LinhaComparativo[] = [...map.values()].map(({ nomes, ...l }) => ({
     ...l,
     // Nome mais frequente do PI (o SIAFI às vezes muda a descrição no meio do ano)
     operacao: [...nomes.entries()].sort((a, b) => b[1] - a[1])[0][0],
-    ncs: l.ncs.sort((a, b) => (b.data ?? '').localeCompare(a.data ?? '')),
+  }));
+
+  // O PI muda a cada ano (OCS8… em 2025, OCS9… em 2026): junta a mesma operação pelo nome
+  const porOperacao = new Map<string, LinhaComparativo>();
+  const anoDoNome = new Map<string, number>();
+  for (const l of porPi) {
+    const chave = nomeCanonico(l.operacao);
+    const anoMaisRecente = Math.max(...Object.keys(l.porAno).map(Number));
+    const atual = porOperacao.get(chave);
+    if (!atual) {
+      porOperacao.set(chave, { ...l, chave, porAno: { ...l.porAno }, ncs: [...l.ncs] });
+      anoDoNome.set(chave, anoMaisRecente);
+      continue;
+    }
+    for (const [ano, v] of Object.entries(l.porAno)) {
+      const alvo = (atual.porAno[Number(ano)] ??= zero());
+      for (const k of Object.keys(v) as (keyof Valores)[]) alvo[k] = Math.round((alvo[k] + v[k]) * 100) / 100;
+    }
+    atual.ncs.push(...l.ncs);
+    atual.pi = [...new Set([...atual.pi.split(' · '), l.pi])].sort().join(' · ');
+    // Exibe o nome usado no ano mais recente
+    if (anoMaisRecente > (anoDoNome.get(chave) ?? 0)) {
+      atual.operacao = l.operacao;
+      anoDoNome.set(chave, anoMaisRecente);
+    }
+  }
+
+  const linhasOut = [...porOperacao.values()].map(l => ({
+    ...l, ncs: l.ncs.sort((a, b) => (b.data ?? '').localeCompare(a.data ?? '')),
   }));
   const maiorTotal = (l: LinhaComparativo) => Math.max(...Object.values(l.porAno).map(totalValores), 0);
   linhasOut.sort((a, b) => maiorTotal(b) - maiorTotal(a));
 
   return { anos: [...anos].sort(), linhas: linhasOut };
+}
+
+/** "OP CATRIMANI II" (2025) e "OP CATRIMANI II" (2026) → "CATRIMANI II": sem prefixo, ano e acento. */
+function nomeCanonico(nome: string): string {
+  return nome
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
+    .replace(/\s+-\s+A CARGO D[OA] .*$/, '')
+    .replace(/^(OPERACAO|OP\.?)\s+/, '')
+    .replace(/\b20\d{2}\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
